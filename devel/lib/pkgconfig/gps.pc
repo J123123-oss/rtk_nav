@@ -1,0 +1,8 @@
+prefix=/home/ubuntu/rtk_nav/devel
+
+Name: gps
+Description: Description of gps
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

@@ -1,0 +1,36 @@
+<launch>
+  <!-- 电机控制节点 -->
+  <node pkg="gps" type="MotorControlNode.py" name="motor_control_node" output="screen"/>
+  <!-- RTK官方功能包 -->
+  <node pkg="nmea_navsat_driver" type="nmea_serial_driver" name="nmea_serial_driver" >
+    <param name="port" value="/dev/ttyUSB0"/>
+    <param name="baud" value="460800"/>
+  </node>
+  <!-- imu 节点 -->
+  <node pkg="gps" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
+<!-- 规划清扫路径 -->
+  <!-- <node pkg="gps" type="cleaning_path_planner.py" name="cleaning_path_planner" output="screen"> -->
+    <!-- <param name="~corner1/lon" value="120.06910407" />
+    <param name="~corner1/lat" value="30.32000295" />
+    <param name="~corner2/lon" value="120.06706355" />
+    <param name="~corner2/lat" value="30.32097315" />
+    <param name="~interval" value="4" />
+    <param name="~edge_distance_lon" value="10" />
+    <param name="~edge_distance_lat" value="10" /> -->
+  <!-- </node> -->
+  <!-- rostopic pub -r 1 /ping/ros std_msgs/String "Hello MQTT" -->
+  <!-- real serial -->
+   <!-- <node pkg="gps" type="serial_listener.py" name="serial_listener" output="screen"/>  -->
+  <!-- 实地测试注释test_topic -->
+  <!-- <node pkg="gps" type="test_topic" name="test_topic_node" output="screen"/> -->
+  <!-- <node pkg="gps" type="mqtt_processor_node" name="mqtt_processor_node" output="screen"/> -->
+
+  <!-- <node pkg="mqtt" type="mqtt" name="mqtt" output="screen"/> -->
+    
+ <!-- MQTT Client Node Configuration -->
+ <!-- <arg name="params_file" default="$(find mqtt_client)/config/params.yaml" /> -->
+ <!-- <arg name="params_file" default="$(find gps)/launch/mqttparams.yaml" /> -->
+  <!-- <node pkg="nodelet" type="nodelet" name="mqtt_client" args="standalone mqtt_client/MqttClient" output="screen">
+    <rosparam command="load" file="$(arg params_file)" />
+  </node> -->
+</launch>

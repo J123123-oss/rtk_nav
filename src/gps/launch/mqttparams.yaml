@@ -1,0 +1,36 @@
+#broker:
+#  host: broker.emqx.io 
+#  port: 1883
+#broker:
+#  host: pec81f9f.ala.cn-hangzhou.emqxsl.cn
+#  port: 8883
+#  user: "admin"
+#  pass: "admin"
+# tls:
+#    enabled: true
+#    ca_certificate: /etc/ssl/certs/emqxsl-ca.crt
+broker:
+  host: 106.12.23.8
+  port: 13234
+  user: 'jifeng'
+  pass: '8dY9hE5FVF2GEIi'
+bridge:
+  ros2mqtt:
+    - ros_topic: /ping/ros
+      mqtt_topic: pingpong/ros
+    - ros_topic: /ping/primitive
+      mqtt_topic: pingpong/primitive
+      primitive: true
+    - ros_topic: /rosmsg
+      mqtt_topic: device/860065077034033/upload
+      primitive: true
+
+  mqtt2ros:
+    - mqtt_topic: pingpong/ros
+      ros_topic: /pong/ros
+    - mqtt_topic: pingpong/primitive
+      ros_topic: /pong/primitive
+      primitive: true
+    - mqtt_topic: device/860065077034033/upload
+      ros_topic: /mqttmsg
+      primitive: true
