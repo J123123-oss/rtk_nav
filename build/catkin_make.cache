@@ -1,2 +1,0 @@
-gps
--DCATKIN_DEVEL_PREFIX=/home/ubuntu/rtk_nav/devel -DCMAKE_INSTALL_PREFIX=/home/ubuntu/rtk_nav/install -G Unix Makefiles
