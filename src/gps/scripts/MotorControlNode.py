@@ -5,37 +5,47 @@ import struct
 import time
 import os
 import math
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Generator
 import rospy
 from std_msgs.msg import String, Float32
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import NavSatFix
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist, Point,Vector3Stamped
+from geometry_msgs.msg import Twist, Vector3
+from gps.msg import WTRTK
 
 
-# -------------------------- 1. 全局配置（与手册/硬件/ROS匹配） --------------------------
+# -------------------------- 1. 全局配置 --------------------------
 # 串口配置（CAN转USB工具）
 SERIAL_PORT = "/dev/CAN-pyserial"    # 实际串口设备（需根据硬件调整）
 SERIAL_BAUDRATE = 921600             # 与CAN转USB工具波特率一致
 SERIAL_TIMEOUT = 0.1                 # 串口超时时间
 
 # RTK导航配置
-RTK_PATH_FILE = "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251117_123454.txt"  # RTK路径文件
-RTK_WAYPOINT_TOLERANCE = 0.1         # 到达目标点的距离 tolerance（米）
-IMU_YAW_OFFSET = 0.0                 # IMU偏航角校准值（根据实际安装调整）
-LINEAR_SPEED_BASE = 0.0124              # 基础线速度（m/s，需根据电机减速比/轮径转换）0.0124m/s>2rad/s
-ANGULAR_SPEED_BASE = 0.1             # 基础角速度（rad/s，差速转向用）
+RTK_PATH_FILE = "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"  # RTK路径文件
+RTK_WAYPOINT_TOLERANCE = 0.5       # 到达目标点的距离 tolerance（米）
+RTK_HEADING_TOLERANCE = 0.5         # 到达目标点的航向角容忍度（度）
+LINEAR_SPEED_BASE = 0.0124           # 基础线速度（m/s，需根据电机减速比/轮径转换）0.0124m/s>2rad/s
+ANGULAR_SPEED_BASE = 0.3             # 调整：航向校准角速度（rad/s）,提高校准效率
+INITIAL_MOVE_TOLERANCE = 0.5         # 初始点到第一个航点的到达阈值（米）
+IMU_CALIBRATION_TIMEOUT = 3.0        # IMU初始校准超时时间（秒）
+HEADING_CALIBRATION_TIMEOUT = 10.0    # 新增：航向校准超时时间（秒），避免卡在转向步骤
 
 # 电机配置（支持多电机差速）
 GLOBAL_MOTOR_CONFIG: List[Dict] = [
     {
-        "id": 127,                      # 左电机ID（1-127，手册限制）
-        "velocity": 0.0,                # 初始速度（rad/s）
-        "current_limit": 20.0,          # 电流限制（A，手册0x7018参数）
-        "run_mode": 2                   # 2=速度模式（手册0x7005参数）
+        "id": 1,                      # 左电机ID（1-127，手册限制）新电机默认127，底层使用1/2/3
+        "velocity": 0.0,              # 初始速度（rad/s）
+        "current_limit": 20.0,        # 电流限制（A，手册0x7018参数）
+        "run_mode": 2                  # 2=速度模式（手册0x7005参数）
     },
     {
         "id": 2,                      # 右电机ID
+        "velocity": 0.0,
+        "current_limit": 20.0,
+        "run_mode": 2
+    },
+    {
+        "id": 3,                      # 滚刷电机ID
         "velocity": 0.0,
         "current_limit": 20.0,
         "run_mode": 2
@@ -53,7 +63,7 @@ SPEED_REF_INDEX = 0x700A   # 速度指令索引（）
 LIMIT_CUR_INDEX = 0x7018   # 电流限制索引（）
 
 # 主机ID与通信类型（手册私有协议）
-MOTOR_MASTER_ID = 253      # 主机ID（0-300）
+MOTOR_MASTER_ID = 99       # 主机ID（0-300） 新电机默认253，底层使用99
 COMM_TYPE_WRITE = 0x12     # 参数写入（十进制18）
 COMM_TYPE_ENABLE = 0x03    # 电机使能（）
 COMM_TYPE_RESET = 0x04     # 电机停止（）
@@ -76,9 +86,30 @@ class SerialMotorController:
         self.serial_baudrate = baudrate
         self.motors = [m for m in GLOBAL_MOTOR_CONFIG if "id" in m]
         rospy.loginfo(f"[MotorCtrl] 加载{len(self.motors)}个电机配置（ID：{[m['id'] for m in self.motors]}）")
-        # 新增：重连参数
-        self.reconnect_interval = 2  # 重连间隔（秒）
-        self.max_reconnect_attempts = 0  # 0表示无限重试
+        self.reconnect_interval = 2
+        self.max_reconnect_attempts = 0
+
+    # 新增：上下文管理器 - 进入时初始化串口
+    def __enter__(self):
+        self.init_serial()
+        return self
+
+    # 新增：上下文管理器 - 退出时自动关闭串口
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.ser and self.ser.is_open:
+            rospy.loginfo("[MotorCtrl] 上下文管理器自动关闭串口")
+            try:
+                self.ser.close()
+            except Exception as e:
+                rospy.logerr(f"[MotorCtrl] 上下文管理器关闭串口失败：{str(e)}")
+        # 停止所有电机
+        for motor in self.motors:
+            try:
+                self.motor_set_speed(motor["id"], 0.0)
+                self.motor_disable(motor["id"])
+            except Exception as e:
+                rospy.logwarn(f"[MotorCtrl] 上下文管理器停止电机{motor['id']}失败：{str(e)}")
+        return False
 
     def init_serial(self) -> bool:
         """初始化串口（连接CAN转USB工具）"""
@@ -203,14 +234,16 @@ class SerialMotorController:
 # -------------------------- 3. RTK路径解析与导航类 --------------------------
 class RTKNavigator:
     def __init__(self):
-        self.waypoints: List[Tuple[float, float]] = []  # RTK航点列表（经度，纬度）
-        self.current_waypoint_idx = 0                   # 当前目标航点索引
+        self.waypoints: List[Tuple[float, float, float]] = []  # RTK航点列表（经度，纬度，航向角(度)）
+        self.current_waypoint_idx = 0                           # 当前目标航点索引
         self.current_gps: Tuple[float, float] = (120.06717, 30.32088)  # 当前GPS位置
-        self.imu_yaw = 0.0                              # 当前IMU偏航角（rad）
+        self.imu_yaw = 0.0                                      # 初始IMU偏航角（rad）
+        self.imu_initialized = False                             # IMU是否完成初始校准
+        self.imu_calibration_offset = 0.0                        # 自动校准的偏移量（rad）
         self.load_rtk_path()
 
     def load_rtk_path(self) -> bool:
-        """加载RTK路径文件（序号,经度,纬度）"""
+        """加载RTK路径文件（序号,经度,纬度,航向角(度)）"""
         if not os.path.exists(RTK_PATH_FILE):
             rospy.logerr(f"[RTKNav] RTK路径文件不存在：{RTK_PATH_FILE}")
             return False
@@ -222,52 +255,220 @@ class RTKNavigator:
                     line = line.strip()
                     if not line:
                         continue
-                    seq, lon, lat = line.split(',')
-                    self.waypoints.append((float(lon), float(lat)))
-            rospy.loginfo(f"[RTKNav] 加载RTK航点{len(self.waypoints)}个：{self.waypoints}")
+                    seq, lon, lat, heading_deg = line.split(',')  # 新增航向角字段
+                    self.waypoints.append((float(lon), float(lat), float(heading_deg)))
+            rospy.loginfo(f"[RTKNav] 加载RTK航点{len(self.waypoints)}个，首个航点：{self.waypoints[0]}")
             return True
         except Exception as e:
             rospy.logerr(f"[RTKNav] 解析RTK文件失败：{str(e)}")
             return False
 
-    def gps_callback(self, msg: Point) -> None:
+    def gps_callback(self, msg: NavSatFix) -> None:
         """GPS位置回调（需订阅GPS节点的位置消息）"""
-        self.current_gps = (msg.x, msg.y)  # x=经度，y=纬度
+        self.current_gps = (msg.longitude, msg.latitude)  # x=经度，y=纬度
 
-    def heading_callback(self, msg: Vector3Stamped) -> None:
-        """IMU数据回调（提取偏航角，用于直线纠偏）"""
-        # 填充时间戳（使用当前时间或传感器原始时间戳）
-        self.imu_yaw = msg.vector.z    # 通常用z轴表示yaw（航向角）
+    def heading_callback(self, msg: WTRTK) -> None:
+        """IMU数据回调（自动校准初始偏移，后续数据基于初始基准修正）"""
+        # 1. 提取INS航向角（度，真北0°顺时针）
+        ins_heading_deg = msg.ins_heading
+        # 2. 转换为rad并归一化到[-π, π]
+        ins_heading_rad = math.radians(ins_heading_deg)
+        ins_heading_rad = math.fmod(ins_heading_rad + math.pi, 2 * math.pi) - math.pi
+        
+        # 3. 首次收到IMU数据时，自动校准偏移（以第一帧为基准）
+        if not self.imu_initialized:
+            # 校准偏移量 = 0 - 第一帧IMU航向角（让初始IMU偏航角为0，与路径基准对齐）
+            self.imu_calibration_offset = -ins_heading_rad
+            self.imu_initialized = True
+            rospy.loginfo(f"[RTKNav] IMU校准完成！初始偏移：{math.degrees(self.imu_calibration_offset):.2f}°")
+        
+        # 4. 应用自动校准偏移，得到最终IMU偏航角（与初始基准一致）
+        self.imu_yaw = ins_heading_rad + self.imu_calibration_offset
+        # 再次归一化，避免累积误差
+        self.imu_yaw = math.fmod(self.imu_yaw + math.pi, 2 * math.pi) - math.pi
+        
+        rospy.logdebug(
+            f"[RTKNav] INS原始航向：{ins_heading_deg:.2f}° → "
+            f"校准偏移：{math.degrees(self.imu_calibration_offset):.2f}° → "
+            f"最终偏航角：{math.degrees(self.imu_yaw):.2f}°"
+        )
 
-    def get_target_waypoint(self) -> Optional[Tuple[float, float]]:
-        """获取当前目标航点"""
+    def get_target_waypoint(self) -> Optional[Tuple[float, float, float]]:
+        """获取当前目标航点（含航向角）"""
         if self.current_waypoint_idx >= len(self.waypoints):
             rospy.loginfo("[RTKNav] 已到达最后一个航点")
             return None
         return self.waypoints[self.current_waypoint_idx]
 
-    def calc_distance_to_waypoint(self, waypoint: Tuple[float, float]) -> float:
-        """计算当前位置到目标航点的距离（简化：度→米，1度≈111319.9米）"""
-        lon_diff = (waypoint[0] - self.current_gps[0]) * 111319.9
-        lat_diff = (waypoint[1] - self.current_gps[1]) * 111319.9
-        return math.hypot(lon_diff, lat_diff)
+    def calc_distance_to_waypoint(self, waypoint: Tuple[float, float, float]) -> float:
+        """使用Haversine公式计算两点经纬度的地表距离（米）"""
+        # 地球平均半径（米）
+        R = 6371000.0
+        
+        # 提取当前位置和目标航点的经纬度（度）
+        lon1, lat1 = self.current_gps
+        lon2, lat2, _ = waypoint
+        
+        # 转换为弧度
+        lon1_rad = math.radians(lon1)
+        lat1_rad = math.radians(lat1)
+        lon2_rad = math.radians(lon2)
+        lat2_rad = math.radians(lat2)
+        
+        # 计算经纬度差（弧度）
+        delta_lon = lon2_rad - lon1_rad
+        delta_lat = lat2_rad - lat1_rad
+        
+        # Haversine公式
+        a = math.sin(delta_lat / 2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2)** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        # 计算距离（米）
+        distance = R * c
+        return distance
 
-    def calc_target_yaw(self, waypoint: Tuple[float, float]) -> float:
-        """计算当前位置到目标航点的目标偏航角"""
-        lon_diff = waypoint[0] - self.current_gps[0]
-        lat_diff = waypoint[1] - self.current_gps[1]
-        target_yaw = math.atan2(lon_diff, lat_diff)  # 经度差→x，纬度差→y
-        target_yaw = math.fmod(target_yaw + math.pi, 2 * math.pi) - math.pi
-        return target_yaw
+    def get_path_heading(self, waypoint: Tuple[float, float, float]) -> float:
+        """获取目标航点的路径航向角（转换为rad并归一化，与IMU基准一致）"""
+        # 修正：航点航向角是绝对角度，需叠加IMU校准偏移（让路径航向与IMU基准对齐）
+        heading_deg = waypoint[2] + math.degrees(self.imu_calibration_offset)
+        heading_rad = math.radians(heading_deg)
+        # 归一化到[-π, π]，与IMU偏航角基准一致
+        heading_rad = math.fmod(heading_rad + math.pi, 2 * math.pi) - math.pi
+        return heading_rad
 
-    def get_speed_correction(self, target_yaw: float) -> float:
-        """直线纠偏：根据IMU偏航角与目标偏航角的差值，计算速度修正量"""
-        yaw_error = target_yaw - self.imu_yaw
-        yaw_error = math.fmod(yaw_error + math.pi, 2 * math.pi) - math.pi  # 归一化误差
-        # 比例控制（Kp=0.5，可调整）
-        correction = 0.5 * yaw_error
-        rospy.logdebug(f"[RTKNav] 偏航误差：{yaw_error:.3f}rad，修正量：{correction:.3f}rad/s")
+    def get_heading_error(self, target_heading: float) -> float:
+        """新增：计算当前航向与目标航向的误差（归一化到[-π, π]，单位：rad）"""
+        heading_error = target_heading - self.imu_yaw
+        # 归一化误差，避免跨π/-π的大角度跳转
+        heading_error = math.fmod(heading_error + math.pi, 2 * math.pi) - math.pi
+        return heading_error
+
+    def get_speed_correction(self, target_heading: float) -> float:
+        yaw_error = self.get_heading_error(target_heading)
+        yaw_error_deg = math.degrees(abs(yaw_error))  # 误差角度（度）
+        # 待测试，需要调整参数
+        # 动态kp：大误差用大kp（快速修正），小误差用小kp（避免震荡）
+        if yaw_error_deg > 10:  # 误差>10°：快速修正
+            kp = 0.8
+        elif yaw_error_deg > 3:  # 误差3°~10°：平衡修正
+            kp = 0.5
+        else:  # 误差<3°：缓慢收敛（避免超调）
+            kp = 0.2
+        
+        correction = kp * yaw_error
+        
+        # 限制修正量最大值（避免电机速度突变）
+        max_correction = 0.3  # 最大修正量（rad/s），可根据电机性能调整
+        correction = max(min(correction, max_correction), -max_correction)
+        
+        rospy.logdebug(
+            f"[RTKNav] 路径航向：{math.degrees(target_heading):.2f}° → "
+            f"IMU航向：{math.degrees(self.imu_yaw):.2f}° → "
+            f"误差：{yaw_error_deg:.2f}° → "
+            f"kp：{kp} → 修正量：{correction:.3f}rad/s"
+        )
         return correction
+
+    def calibrate_heading_at_waypoint(self, target_heading: float) -> Generator[Tuple[float, float], None, bool]:
+        """新增：航点航向校准（到达距离阈值后，原地转向校准航向）"""
+        rospy.loginfo(
+            f"[RTKNav] 开始航向校准：目标航向{math.degrees(target_heading):.2f}°，当前航向{math.degrees(self.imu_yaw):.2f}°，"
+            f"容忍度±{RTK_HEADING_TOLERANCE}°，超时{HEADING_CALIBRATION_TIMEOUT}秒"
+        )
+        start_time = rospy.Time.now()
+        
+        while not rospy.is_shutdown():
+            # 1. 计算航向误差（rad）和误差角度（deg）
+            heading_error_rad = self.get_heading_error(target_heading)
+            heading_error_deg = math.degrees(abs(heading_error_rad))
+            
+            # 2. 航向达标：退出校准
+            if heading_error_deg <= RTK_HEADING_TOLERANCE:
+                rospy.loginfo(f"[RTKNav] 航向校准完成！最终误差：{heading_error_deg:.2f}°（≤{RTK_HEADING_TOLERANCE}°）")
+                return True
+            
+            # 3. 超时处理：强制退出（避免卡死）
+            elapsed_time = (rospy.Time.now() - start_time).to_sec()
+            if elapsed_time > HEADING_CALIBRATION_TIMEOUT:
+                rospy.logwarn(f"[RTKNav] 航向校准超时！当前误差：{heading_error_deg:.2f}°（＞{RTK_HEADING_TOLERANCE}°），继续下一段导航")
+                return True  # 超时仍返回True，不阻断导航
+            
+            # 4. 原地转向：根据误差方向控制电机（差速转向，不移动,待测试正负）
+            # 误差为正：需要顺时针转（右电机反转，左电机正转）
+            # 误差为负：需要逆时针转（左电机反转，右电机正转）
+            angular_speed = ANGULAR_SPEED_BASE
+            if heading_error_rad > 0:
+                left_speed = angular_speed
+                right_speed = -angular_speed
+            else:
+                left_speed = -angular_speed
+                right_speed = angular_speed
+            
+            # 5. 返回转向速度指令（由上层调用设置电机）
+            yield (left_speed, right_speed)
+        
+        return False
+
+    def move_to_first_waypoint(self) -> Generator[Tuple[float, float], None, bool]:
+        """从当前初始位置移动到第一个航点（含距离+航向校验）"""
+        if not self.waypoints:
+            rospy.logerr("[RTKNav] 无航点数据，无法执行初始移动")
+            return False
+        
+        # 等待IMU校准完成
+        if not self.imu_initialized:
+            rospy.loginfo(f"[RTKNav] 等待IMU初始校准（超时{IMU_CALIBRATION_TIMEOUT}秒）...")
+            start_time = rospy.Time.now()
+            while not self.imu_initialized and not rospy.is_shutdown():
+                rospy.sleep(0.05)
+                if (rospy.Time.now() - start_time).to_sec() > IMU_CALIBRATION_TIMEOUT:
+                    rospy.logwarn("[RTKNav] IMU校准超时，使用默认偏航角0rad")
+                    break
+                
+        first_waypoint = self.waypoints[0]
+        rospy.loginfo(f"[RTKNav] 开始从初始位置移动到第一个航点：{first_waypoint[:2]}，目标航向：{first_waypoint[2]}°")
+        
+        last_distance = 0
+        while not rospy.is_shutdown():
+            # 1. 计算到第一个航点的距离
+            distance = self.calc_distance_to_waypoint(first_waypoint)
+            if abs(last_distance - distance) > 0.1:  # 距离变化超过0.1m才打印日志
+                rospy.loginfo(f"[RTKNav] 到第一个航点距离：{distance:.2f}m")
+                last_distance = distance
+            
+            # 2. 距离达标：开始航向校准
+            if distance < INITIAL_MOVE_TOLERANCE:
+                rospy.loginfo(f"[RTKNav] 已到达第一个航点距离阈值（{distance:.2f}m ≤ {INITIAL_MOVE_TOLERANCE}m）")
+                target_heading = self.get_path_heading(first_waypoint)
+                # 调用航向校准生成器
+                heading_calibrator = self.calibrate_heading_at_waypoint(target_heading)
+                while not rospy.is_shutdown():
+                    try:
+                        left_speed, right_speed = next(heading_calibrator)
+                        yield (left_speed, right_speed)
+                    except StopIteration:
+                        break
+                return True
+            
+            # 3. 距离未达标：直线行驶+实时纠偏
+            target_heading = self.get_path_heading(first_waypoint)
+            correction = self.get_speed_correction(target_heading)
+            
+            # 4. 差速控制：左电机=基础速度-修正量，右电机=基础速度+修正量
+            base_speed = LINEAR_SPEED_BASE
+            left_speed_rad = self.rad_from_linear(base_speed) - correction
+            right_speed_rad = self.rad_from_linear(base_speed) + correction
+            
+            # 5. 返回速度指令（由上层调用设置电机）
+            yield (left_speed_rad, right_speed_rad)
+        
+        return False
+
+    def rad_from_linear(self, linear_speed: float) -> float:
+        """线速度（m/s）转电机角速度（rad/s）：需根据电机减速比/轮径校准"""
+        reduction_ratio = 7.75  # 电机减速比（手册0x201f参数）
+        wheel_diameter = 0.04874 # 车轮直径（m，需根据实际硬件调整）48.74mm
+        return (linear_speed * reduction_ratio) / wheel_diameter
 
 
 # -------------------------- 4. ROS节点核心逻辑 --------------------------
@@ -289,13 +490,13 @@ class MotorControlNode:
 
         # ROS订阅器
         rospy.Subscriber("/keyboard/control", String, self.keyboard_callback)  # 键盘控制
-        rospy.Subscriber("/fix", Point, self.rtk_nav.gps_callback)  # GPS位置
-        rospy.Subscriber("/imu_data", Vector3Stamped, self.rtk_nav.heading_callback)  # RTK的惯导数据
+        rospy.Subscriber("/fix", NavSatFix, self.rtk_nav.gps_callback)  # GPS位置
+        rospy.Subscriber("/wtrtk_data", WTRTK, self.rtk_nav.heading_callback)  # 惯导数据
         rospy.Subscriber("/rtk_nav/start", String, self.rtk_nav_start_callback)  # RTK导航启动
 
         # ROS发布器
         self.state_pub = rospy.Publisher("/motor/state", String, queue_size=10)  # 电机状态
-        self.speed_pub = rospy.Publisher("/motor/speed", Twist, queue_size=10)  # 电机速度
+        self.speed_pub = rospy.Publisher("/motor/current_speed", Vector3, queue_size=10)  # 电机速度
 
         # 初始化电机（进入START状态）
         self.switch_state('a')
@@ -311,7 +512,7 @@ class MotorControlNode:
     def rtk_nav_start_callback(self, msg: String) -> None:
         """RTK导航启动回调（接收"start"指令开始导航）"""
         if msg.data.strip().lower() == "start" and CURRENT_STATE != "STOP":
-            rospy.loginfo("[ROSNode] 开始RTK导航")
+            rospy.loginfo("[ROSNode] 开始RTK导航（含初始点到第一个航点）")
             self.run_rtk_navigation()
 
     def switch_state(self, key: str) -> None:
@@ -347,66 +548,94 @@ class MotorControlNode:
 
         elif new_state == "FORWARD":
             # 前进：双电机正转（需先确认电机转向，调整符号）
-            left_speed = self.rad_from_linear(LINEAR_SPEED_BASE)
-            right_speed = self.rad_from_linear(LINEAR_SPEED_BASE)
+            left_speed = self.rtk_nav.rad_from_linear(-LINEAR_SPEED_BASE)
+            right_speed = self.rtk_nav.rad_from_linear(LINEAR_SPEED_BASE)
             self.set_motors_speed(left_speed, right_speed)
 
         elif new_state == "BACKWARD":
             # 后退：双电机反转
-            left_speed = -self.rad_from_linear(LINEAR_SPEED_BASE)
-            right_speed = -self.rad_from_linear(LINEAR_SPEED_BASE)
+            left_speed = -self.rtk_nav.rad_from_linear(LINEAR_SPEED_BASE)
+            right_speed = -self.rtk_nav.rad_from_linear(-LINEAR_SPEED_BASE)
             self.set_motors_speed(left_speed, right_speed)
 
         # 发布当前状态
         self.state_pub.publish(CURRENT_STATE)
 
-    def rad_from_linear(self, linear_speed: float) -> float:
-        """线速度（m/s）转电机角速度（rad/s）：需根据电机减速比/轮径校准"""
-        # 公式：rad/s = (linear_speed * 减速比) / 轮径（单位：m）1-2rad/s
-        # 示例：减速比7.75，轮径0.04874m → rad/s = (v *7.75)/0.04874 = 77.5*v
-        reduction_ratio = 7.75  # 电机减速比（手册0x201f参数）
-        wheel_diameter = 0.04874     # 车轮直径（m，需根据实际硬件调整）48.74mm
-        return (linear_speed * reduction_ratio) / wheel_diameter
-
     def set_motors_speed(self, left_speed: float, right_speed: float) -> None:
         """设置双电机速度（差速控制）"""
-        # 左电机（ID127）
-        self.motor_ctrl.motor_set_speed(127, left_speed)
-        # 右电机（ID=）
+        # 左电机（ID=1）
+        self.motor_ctrl.motor_set_speed(1, left_speed)
+        # 右电机（ID=2）
         self.motor_ctrl.motor_set_speed(2, right_speed)
-        # 发布速度消息
-        speed_msg = Twist()
-        speed_msg.linear.x = (left_speed + right_speed) / 2  # 平均线速度
-        speed_msg.angular.z = (right_speed - left_speed) / 0.5  # 角速度（轮距0.5m，需调整）
-        self.speed_pub.publish(speed_msg)
+        wheel_speed_msg = Vector3()
+        wheel_speed_msg.x = left_speed    # 左轮角速度（rad/s）
+        wheel_speed_msg.y = right_speed   # 右轮角速度（rad/s）
+        wheel_speed_msg.z = 0.0           # 预留字段，无意义设为0
+        self.speed_pub.publish(wheel_speed_msg)  # 发布左右轮速度
 
     def run_rtk_navigation(self) -> None:
-        """执行RTK导航（按航点依次移动，直线纠偏）"""
+        """执行RTK导航:初始点→第一个航点→后续航点（均含距离+航向校验）"""
+        # 第一步：从初始位置移动到第一个航点
+        try:
+            initial_move_generator = self.rtk_nav.move_to_first_waypoint()
+            while not rospy.is_shutdown():
+                try:
+                    left_speed, right_speed = next(initial_move_generator)
+                    self.set_motors_speed(left_speed, right_speed)
+                except StopIteration:
+                    # 初始移动完成，切换到第一个航点
+                    self.rtk_nav.current_waypoint_idx = 1
+                    break
+                self.rate.sleep()
+        except Exception as e:
+            rospy.logerr(f"[ROSNav] 初始点到第一个航点移动失败：{str(e)}")
+            self.switch_state('s')
+            return
+
+        # 第二步：按航点依次导航（从第二个航点开始，每个航点均校验距离+航向）
+        last_distance = 0.0
+        last_target_heading = 0.0
         while not rospy.is_shutdown() and self.rtk_nav.current_waypoint_idx < len(self.rtk_nav.waypoints):
             target_waypoint = self.rtk_nav.get_target_waypoint()
             if not target_waypoint:
                 break
-
-            # 1. 计算到目标航点的距离和目标偏航角
+            # 1. 计算到目标航点的距离和目标航向角
             distance = self.rtk_nav.calc_distance_to_waypoint(target_waypoint)
-            target_yaw = self.rtk_nav.calc_target_yaw(target_waypoint)
-            rospy.loginfo(f"[ROSNav] 目标航点{self.rtk_nav.current_waypoint_idx+1}：距离{distance:.2f}m")
+            target_heading = self.rtk_nav.get_path_heading(target_waypoint)
+            if abs(last_distance - distance) > 0.1 or abs(last_target_heading - target_heading) > 0.1:  # 变化超过0.1m才打印日志
+                last_distance = distance
+                last_target_heading = target_heading
+                rospy.loginfo(f"[ROSNav] 目标航点{self.rtk_nav.current_waypoint_idx+1}：距离{distance:.2f}m，目标航向{math.degrees(target_heading):.2f}°")
 
-            # 2. 到达目标航点：切换到下一个
-            if distance < RTK_WAYPOINT_TOLERANCE:
-                rospy.loginfo(f"[ROSNav] 到达航点{self.rtk_nav.current_waypoint_idx+1}")
-                self.rtk_nav.current_waypoint_idx += 1
-                self.switch_state('a')  # 短暂停止，准备下一段
-                time.sleep(1.0)
-                continue
+            # 2. 距离未达标：直线行驶+实时纠偏
+            if distance >= RTK_WAYPOINT_TOLERANCE:
+                # 直线纠偏：基于路径自带航向角计算速度修正量
+                correction = self.rtk_nav.get_speed_correction(target_heading)
+                # 差速控制：左电机=基础速度-修正量，右电机=基础速度+修正量（直线行驶）
+                base_speed_rad = self.rtk_nav.rad_from_linear(LINEAR_SPEED_BASE)
+                left_speed = base_speed_rad - correction
+                right_speed = base_speed_rad + correction
+                self.set_motors_speed(left_speed, right_speed)
 
-            # 3. 直线纠偏：计算速度修正量
-            correction = self.rtk_nav.get_speed_correction(target_yaw)
-            # 4. 差速控制：左电机=基础速度-修正量，右电机=基础速度+修正量
-            base_speed = self.rad_from_linear(LINEAR_SPEED_BASE)
-            left_speed = base_speed - correction
-            right_speed = base_speed + correction
-            self.set_motors_speed(left_speed, right_speed)
+            # 3. 距离达标：原地航向校准
+            else:
+                rospy.loginfo(f"[ROSNav] 已到达航点{self.rtk_nav.current_waypoint_idx+1}距离阈值（{distance:.2f}m ≤ {RTK_WAYPOINT_TOLERANCE}m）")
+                # 调用航向校准生成器
+                heading_calibrator = self.rtk_nav.calibrate_heading_at_waypoint(target_heading)
+                while not rospy.is_shutdown():
+                    try:
+                        left_speed, right_speed = next(heading_calibrator)
+                        self.set_motors_speed(left_speed, right_speed)
+                    except StopIteration as e:
+                        # 航向校准完成，切换到下一个航点
+                        # 捕获航向校准的return值
+                        calib_result = e.value if hasattr(e, 'value') else False
+                        rospy.loginfo(f"[ROSNav] 航点{self.rtk_nav.current_waypoint_idx+1}航向校准完成，结果：{calib_result}")
+                        self.rtk_nav.current_waypoint_idx += 1
+                        # self.switch_state('a')
+                        time.sleep(1.0)
+                        break
+                    self.rate.sleep()
 
             self.rate.sleep()
 
@@ -437,10 +666,30 @@ if __name__ == "__main__":
         node.run()
     except rospy.ROSInterruptException:
         rospy.loginfo("[ROSNode] 节点被中断")
+    except Exception as e:
+        rospy.logerr(f"[ROSNode] 节点运行异常：{str(e)}")
     finally:
-        # 退出时停止电机并关闭串口
-        if 'node' in locals() and node.motor_ctrl.ser:
+        # 三重保障：停止电机 → 关闭串口 → 释放资源
+        if 'node' in locals():
+            # 1. 先停止所有电机（避免电机持续运行）
+            rospy.loginfo("[ROSNode] 退出时停止所有电机...")
             for motor in node.motor_ctrl.motors:
-                node.motor_ctrl.motor_disable(motor["id"])
-            node.motor_ctrl.ser.close()
-            rospy.loginfo("[ROSNode] 电机已停止，串口已关闭")
+                try:
+                    node.motor_ctrl.motor_set_speed(motor["id"], 0.0)
+                    node.motor_ctrl.motor_disable(motor["id"])
+                except Exception as e:
+                    rospy.logwarn(f"[ROSNode] 停止电机{motor['id']}失败：{str(e)}")
+                time.sleep(0.001)
+            
+            # 2. 关闭串口（关键：先判断是否打开）
+            if node.motor_ctrl.ser and node.motor_ctrl.ser.is_open:
+                rospy.loginfo("[ROSNode] 关闭串口连接...")
+                try:
+                    node.motor_ctrl.ser.close()
+                    rospy.loginfo("[ROSNode] 串口已关闭")
+                except Exception as e:
+                    rospy.logerr(f"[ROSNode] 关闭串口失败：{str(e)}")
+            else:
+                rospy.loginfo("[ROSNode] 串口未打开，无需关闭")
+        
+        rospy.loginfo("[ROSNode] 节点退出完成")

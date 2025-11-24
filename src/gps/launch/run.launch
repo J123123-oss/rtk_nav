@@ -1,14 +1,19 @@
 <launch>
   <!-- 电机控制节点 -->
   <node pkg="gps" type="MotorControlNode.py" name="motor_control_node" output="screen"/>
-  <!-- RTK官方功能包 -->
-  <node pkg="nmea_navsat_driver" type="nmea_serial_driver" name="nmea_serial_driver" >
-    <param name="port" value="/dev/ttyUSB0"/>
-    <param name="baud" value="460800"/>
-  </node>
+  <!-- RTK消息解析 -->
+  <!-- <node pkg="gps" type="wtrtk_serial_driver.py" name="wtrtk_serial_driver" > -->
+    <!-- <param name="port" value="/dev/WTRTK"/> -->
+    <!-- <param name="baud" value="460800"/> -->
+  <!-- </node> -->
+  <node pkg="gps" type="wtrtk_parse_txt.py" name="wtrtk_parse_txt" output="screen"/>
   <!-- imu 节点 -->
-  <node pkg="gps" type="imu_parser_node.py" name="imu_parser_node" output="screen"/>
-<!-- 规划清扫路径 -->
+  <!-- <node pkg="gps" type="imu_parser_node.py" name="imu_parser_node" output="screen"/> -->
+
+
+<!-- 新场景第一步：cleaning_path_planner规划清扫路径 -->
+
+
   <!-- <node pkg="gps" type="cleaning_path_planner.py" name="cleaning_path_planner" output="screen"> -->
     <!-- <param name="~corner1/lon" value="120.06910407" />
     <param name="~corner1/lat" value="30.32000295" />

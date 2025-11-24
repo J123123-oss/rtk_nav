@@ -3,6 +3,6 @@ prefix=/home/ubuntu/rtk_nav/devel
 Name: gps
 Description: Description of gps
 Version: 0.0.0
-Cflags: 
+Cflags: -I/home/ubuntu/rtk_nav/devel/include
 Libs: -L${prefix}/lib 
-Requires: 
+Requires: roscpp rospy std_msgs message_runtime

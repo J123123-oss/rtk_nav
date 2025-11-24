@@ -26,6 +26,47 @@ def get_latlon_from_utm(easting, northing, zone_number, zone_letter):
     """将UTM坐标转换为经纬度"""
     return utm.to_latlon(easting, northing, zone_number, zone_letter)
 
+def calculate_heading_angles(path_latlon):
+    """
+    计算轨迹中每个点的航向角（单位：度，0°为北，顺时针递增）
+    
+    参数:
+        path_latlon: 轨迹点列表，格式为[(lon1, lat1), (lon2, lat2), ...]
+    
+    返回:
+        headings: 航向角列表，长度与path_latlon相同
+    """
+    headings = []
+    if len(path_latlon) <= 1:
+        # 若轨迹点不足2个，航向角默认为0
+        return [0.0] * len(path_latlon)
+    
+    for i in range(len(path_latlon)):
+        if i == len(path_latlon) - 1:
+            # 最后一个点沿用前一个点的航向角
+            headings.append(headings[-1])
+        else:
+            # 提取当前点和下一个点的经纬度（弧度）
+            lon1, lat1 = path_latlon[i]
+            lon2, lat2 = path_latlon[i+1]
+            
+            lat1_rad = math.radians(lat1)
+            lat2_rad = math.radians(lat2)
+            delta_lon_rad = math.radians(lon2 - lon1)
+            
+            # 计算方位角（基于球面三角公式）
+            y = math.sin(delta_lon_rad) * math.cos(lat2_rad)
+            x = math.cos(lat1_rad) * math.sin(lat2_rad) - \
+                math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon_rad)
+            heading_rad = math.atan2(y, x)  # 弧度，范围(-π, π)
+            
+            # 转换为度并归一化到0°~360°
+            heading_deg = math.degrees(heading_rad)
+            heading_deg = (heading_deg + 360) % 360  # 确保为正角度
+            headings.append(heading_deg)
+    
+    return headings
+
 def generate_cleaning_path(corner1, corner2, param):
     """生成矩形区域的清扫路径（支持经度/纬度方向分别设置边缘距离）"""
     lon1, lat1 = corner1
@@ -196,13 +237,16 @@ def main():
         save_dir = os.path.expanduser("/home/ubuntu/rtk_nav/src/gps/cleaning_path/")
         os.makedirs(save_dir, exist_ok=True)  # 确保目录存在
         points_filename = os.path.join(save_dir, f"cleaning_path_{timestamp}.txt")
-        
+        headings = calculate_heading_angles(path_latlon)
+
+        # 保存路径点时同时写入航向角
         with open(points_filename, "w", encoding="utf-8") as f:
-            f.write("序号,经度,纬度\n")
+            f.write("序号,经度,纬度,航向角(度)\n")  # 新增航向角列
             for i in range(len(path_latlon)):
                 lon, lat = path_latlon[i]
-                f.write(f"{i+1},{lon:.8f},{lat:.8f}\n")
-        rospy.loginfo(f"所有路径点已保存到 {points_filename} 文件")
+                heading = headings[i]
+                f.write(f"{i+1},{lon:.8f},{lat:.8f},{heading:.2f}\n")  # 保留2位小数
+        rospy.loginfo(f"所有路径点及航向角已保存到 {points_filename} 文件")
         
         # 绘制清扫路径
         fig, ax = plt.subplots(figsize=(10, 8))
