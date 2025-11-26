@@ -520,6 +520,18 @@ class RTKNavigator:
 
     def gps_callback(self, msg: NavSatFix) -> None:
         """GPS位置回调（需订阅GPS节点的位置消息）"""
+        if msg.status.status < 0:
+            rospy.logwarn("[RTKNav] GPS信号无效，忽略当前数据")
+            return
+        elif msg.status.status ==1:
+            rospy.loginfo("[RTKNav] GPS信号弱，单点定位")
+        elif msg.status.status ==2:
+            rospy.loginfo("[RTKNav] 差分定位")
+        elif msg.status.status ==3:
+            rospy.loginfo("[RTKNav] RTK定位")
+        elif msg.status.status ==4:
+            rospy.loginfo("[RTKNav] RTK固定解")
+
         self.current_gps = (msg.longitude, msg.latitude)  # x=经度，y=纬度
 
     def heading_callback(self, msg: WTRTK) -> None:
