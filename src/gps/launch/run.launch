@@ -1,6 +1,8 @@
 <launch>
   <!-- 电机控制节点 -->
-  <node pkg="gps" type="MotorControlNode.py" name="motor_control_node" output="screen"/>
+  <node pkg="gps" type="MotorControlNode.py" name="motor_control_node" output="screen">
+    <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"/>
+  </node>
   <!-- RTK实时消息解析 -->
   <!-- <node pkg="gps" type="wtrtk_serial_driver.py" name="wtrtk_serial_driver" > -->
     <!-- <param name="port" value="/dev/WTRTK"/> -->

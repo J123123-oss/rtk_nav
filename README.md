@@ -1,0 +1,5 @@
+1
+先单独启动launch运行cleaning_path_planner，生成轨迹，并保存。
+2
+launch运行MotorControlNode修改"~rtk_path_file"为cleaning_path目录下刚生成的文件
+RTK可以launch中录制的RTK消息解析调试，实地测试使用RTK实时消息解析

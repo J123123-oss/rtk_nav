@@ -39,7 +39,8 @@ DEAD_ZONE_SBUS = 20      # 摇杆死区
 MAX_SPEED_REMOTE = 2.0   # 遥控器控制最大角速度（rad/s，可调整）
 
 # RTK导航配置
-RTK_PATH_FILE = "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"  # RTK路径文件
+RTK_PATH_FILE = rospy.get_param('~rtk_path_file', "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt")
+# RTK_PATH_FILE = "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"  # RTK路径文件
 RTK_WAYPOINT_TOLERANCE = 0.5       # 到达目标点的距离 tolerance（米）
 RTK_HEADING_TOLERANCE = 0.5         # 到达目标点的航向角容忍度（度）
 LINEAR_SPEED_BASE = 0.0124           # 基础线速度（m/s，需根据电机减速比/轮径转换）0.0124m/s>2rad/s
@@ -484,7 +485,7 @@ class RTKNavigator:
     def __init__(self):
         self.waypoints: List[Tuple[float, float, float]] = []  # RTK航点列表（经度，纬度，航向角(度)）
         self.current_waypoint_idx = 0                           # 当前目标航点索引
-        self.current_gps: Tuple[float, float] = (120.06717, 30.32088)  # 当前GPS位置
+        self.current_gps: Tuple[float, float] = None  # 当前GPS位置
         self.imu_yaw = 0.0                                      # 初始IMU偏航角（rad），RTK惯导提供
         self.imu_initialized = False                             # IMU是否完成初始校准
         self.imu_calibration_offset = 0.0                        # 自动校准的偏移量（rad）
