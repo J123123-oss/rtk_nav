@@ -4,8 +4,9 @@ from std_msgs.msg import String
 import serial
 
 def talker():
-    rospy.init_node('serial_publisher', anonymous=True)
-    pub = rospy.Publisher('serial_topic', String, queue_size=10)
+    rclpy.init()
+    node = rclpy.create_node('serial_publisher', anonymous=True)
+    pub = node.create_publisher(String, queue_size=10, 'serial_topic')
     rate = rospy.Rate(10)  # 10 Hz
 
     # Open the serial port

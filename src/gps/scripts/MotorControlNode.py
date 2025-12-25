@@ -761,7 +761,8 @@ class RTKNavigator:
 # -------------------------- 5. ROS节点核心逻辑 --------------------------
 class MotorControlNode:
     def __init__(self):
-        rospy.init_node('motor_control_node', anonymous=True)
+        rclpy.init()
+        node = rclpy.create_node('motor_control_node', anonymous=True)
         self.rate = rospy.Rate(50)  # 提高到50Hz，适配遥控器控制频率
 
         # 初始化核心模块
@@ -782,17 +783,17 @@ class MotorControlNode:
         self.rtk_nav = RTKNavigator()
 
         # ROS订阅器
-        rospy.Subscriber("/keyboard/control", String, self.keyboard_callback)  # 键盘控制
-        rospy.Subscriber("/fix", NavSatFix, self.rtk_nav.gps_callback)  # GPS位置
-        rospy.Subscriber("/wtrtk_data", WTRTK, self.rtk_nav.heading_callback)  # 惯导数据
-        rospy.Subscriber("/rtk_nav/start", String, self.rtk_nav_start_callback)  # RTK导航启动
-        rospy.Subscriber("/rtk_nav/resume", String, self.rtk_nav_resume_callback)  # 新增：恢复导航
+        node.create_subscription(String, "/keyboard/control", self.keyboard_callback)  # 键盘控制
+        node.create_subscription(NavSatFix, "/fix", self.rtk_nav.gps_callback)  # GPS位置
+        node.create_subscription(WTRTK, "/wtrtk_data", self.rtk_nav.heading_callback)  # 惯导数据
+        node.create_subscription(String, "/rtk_nav/start", self.rtk_nav_start_callback)  # RTK导航启动
+        node.create_subscription(String, "/rtk_nav/resume", self.rtk_nav_resume_callback)  # 新增：恢复导航
 
         # ROS发布器
-        self.state_pub = rospy.Publisher("/motor/state", String, queue_size=10)  # 电机状态
-        self.speed_pub = rospy.Publisher("/motor/current_speed", Vector3, queue_size=10)  # 电机速度
-        self.mode_pub = rospy.Publisher("/control/mode", String, queue_size=10)  # 控制模式发布
-        self.nav_state_pub = rospy.Publisher("/rtk_nav/state", String, queue_size=10)  # 新增：导航状态发布
+        self.state_pub = node.create_publisher(String, queue_size=10, "/motor/state")  # 电机状态
+        self.speed_pub = node.create_publisher(Vector3, queue_size=10, "/motor/current_speed")  # 电机速度
+        self.mode_pub = node.create_publisher(String, queue_size=10, "/control/mode")  # 控制模式发布
+        self.nav_state_pub = node.create_publisher(String, queue_size=10, "/rtk_nav/state")  # 新增：导航状态发布
 
         # 初始化电机（进入START状态）
         self.switch_state('a')

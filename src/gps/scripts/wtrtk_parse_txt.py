@@ -10,7 +10,8 @@ from serial_comms.msg import WTRTK  # 替换为你的功能包名
 class WTRTKFileParser:
     def __init__(self):
         # 初始化节点
-        rospy.init_node('wtrtk_file_parser', anonymous=True)
+        rclpy.init()
+        node = rclpy.create_node('wtrtk_file_parser', anonymous=True)
         
         # 读取文件路径参数（默认：./返回.txt）
         self.file_path = rospy.get_param('~file_path', '/home/ubuntu/rtk_nav/返回.txt')
@@ -18,8 +19,8 @@ class WTRTKFileParser:
         self.play_rate = rospy.get_param('~play_rate', 0.1)
         
         # 消息发布者
-        self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)
-        self.wtrtk_pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
+        self.fix_pub = node.create_publisher(NavSatFix, queue_size=10, '/fix')
+        self.wtrtk_pub = node.create_publisher(WTRTK, queue_size=10, '/wtrtk_data')
         
         self.buffer = ""  # 缓存文件读取的数据
         self.latest_fix = None  # 最新GNGGA解析结果

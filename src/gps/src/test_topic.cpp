@@ -1,5 +1,5 @@
-#include <ros/ros.h>
-#include <std_msgs/String.h>
+#include "rclcpp/rclcpp.hpp"
+#include <std_msgs/msg/string.hpp>
 #include <fstream>
 #include <vector>
 #include <string>
@@ -7,7 +7,7 @@
 
 void send_message(ros::Publisher& pub, int& counter, const std::vector<std::string>& messages, int group_size)
 {
-    std_msgs::String msg;
+    std_msgs::msg::String msg;
     
     // 计算当前组的起始位置
     int start_index = (counter * group_size) % messages.size();
@@ -33,7 +33,7 @@ std::vector<std::string> load_messages_from_file(const std::string& file_path)
 
     if (!file.is_open())
     {
-        ROS_ERROR("Failed to open file: %s", file_path.c_str());
+        RCLCPP_ERROR(rclcpp::get_logger("Gps"), "Failed to open file: %s", file_path.c_str());
         return messages;
     }
 
@@ -50,25 +50,25 @@ std::vector<std::string> load_messages_from_file(const std::string& file_path)
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "serial_publisher");
-    ros::NodeHandle nh;
-    ros::Publisher pub = nh.advertise<std_msgs::String>("rosmsg", 1000);
-    ros::Rate loop_rate(10); // 10 Hz, 发布频率可以根据需要调整
+    rclcpp::init(argc, argv);
+    auto nh = rclcpp::Node::make_shared("serial_publisher");
+    auto pub = nh.advertise<std_msgs::msg::String>("rosmsg", 1000);
+    rclcpp::Rate loop_rate(10); // 10 Hz, 发布频率可以根据需要调整
 
     // 从文件中加载消息
     std::vector<std::string> messages = load_messages_from_file("/home/ubuntu/robot_solar/src/gps/rtkmsgs/返回.txt");
     if (messages.empty())
     {
-        ROS_ERROR("No messages loaded from the file.");
+        RCLCPP_ERROR(rclcpp::get_logger("Gps"), "No messages loaded from the file.");
         return 1;
     }
 
     int counter = 0;
     int group_size = 10; // 每组包含10行消息
-    while (ros::ok())
+    while (rclcpp::ok())
     {
         send_message(pub, counter, messages, group_size);
-        ros::spinOnce();
+        rclcpp::spin_some(node);
         loop_rate.sleep();
     }
 
@@ -80,15 +80,15 @@ int main(int argc, char** argv)
 
 
 
-// #include <ros/ros.h>
-// #include <std_msgs/String.h>
+// #include "rclcpp/rclcpp.hpp"
+// #include <std_msgs/msg/string.hpp>
 // #include <fstream>
 // #include <vector>
 // #include <string>
 
 // void send_message(ros::Publisher& pub, int& counter, const std::vector<std::string>& messages)
 // {
-//     std_msgs::String msg;
+//     std_msgs::msg::String msg;
     
 //     // 如果计数器超出了信息列表的范围，重新从头开始发布
 //     int index = counter % messages.size();
@@ -105,7 +105,7 @@ int main(int argc, char** argv)
 
 //     if (!file.is_open())
 //     {
-//         ROS_ERROR("Failed to open file: %s", file_path.c_str());
+//         RCLCPP_ERROR(rclcpp::get_logger("Gps"), "Failed to open file: %s", file_path.c_str());
 //         return messages;
 //     }
 
@@ -122,25 +122,26 @@ int main(int argc, char** argv)
 
 // int main(int argc, char** argv)
 // {
-//     ros::init(argc, argv, "serial_publisher");
-//     ros::NodeHandle nh;
-//     ros::Publisher pub = nh.advertise<std_msgs::String>("rosmsg", 1000);
-//     ros::Rate loop_rate(100); // 10 Hz
+//     rclcpp::init(argc, argv);
+     auto node = rclcpp::Node::make_shared("serial_publisher");
+//     rclcpp::Node nh;
+//     auto pub = nh.advertise<std_msgs::msg::String>("rosmsg", 1000);
+//     rclcpp::Rate loop_rate(100); // 10 Hz
 
 //     // 从文件中加载消息
 //     // std::vector<std::string> messages = load_messages_from_file("/home/orangepi/ros_ws/src/gps/rtkmsgs/bd1.txt");
 //     std::vector<std::string> messages = load_messages_from_file("/home/rosubuntu/robot_solar/src/gps/rtkmsgs/bd1.txt");
 //     if (messages.empty())
 //     {
-//         ROS_ERROR("No messages loaded from the file.");
+//         RCLCPP_ERROR(rclcpp::get_logger("Gps"), "No messages loaded from the file.");
 //         return 1;
 //     }
 
 //     int counter = 0;
-//     while (ros::ok())
+//     while (rclcpp::ok())
 //     {
 //         send_message(pub, counter, messages);
-//         ros::spinOnce();
+//         rclcpp::spin_some(node);
 //         loop_rate.sleep();
 //     }
 
@@ -179,7 +180,7 @@ int main(int argc, char** argv)
 
 // void send_message(ros::Publisher& pub, int& counter)
 // {
-//     std_msgs::String msg;
+//     std_msgs::msg::String msg;
 
 //     if (counter % 2 == 0) {
 //         msg.data = "$GNGGA,101620.00,2140.83682949,N,11055.09963460,E,1,20,0.7,59.7145,M,-13.4263,M,,*67\n";
@@ -193,15 +194,16 @@ int main(int argc, char** argv)
 
 // int main(int argc, char** argv)
 // {
-//     ros::init(argc, argv, "serial_publisher");
-//     ros::NodeHandle nh;
-//     ros::Publisher pub = nh.advertise<std_msgs::String>("serial_topic", 1000);
-//     ros::Rate loop_rate(1); // 1 Hz
+//     rclcpp::init(argc, argv);
+     auto node = rclcpp::Node::make_shared("serial_publisher");
+//     rclcpp::Node nh;
+//     auto pub = nh.advertise<std_msgs::msg::String>("serial_topic", 1000);
+//     rclcpp::Rate loop_rate(1); // 1 Hz
 //     int counter = 0;
-//     while (ros::ok())
+//     while (rclcpp::ok())
 //     {
 //         send_message(pub, counter);
-//         ros::spinOnce();
+//         rclcpp::spin_some(node);
 //         loop_rate.sleep();
 //     }
 

@@ -7,7 +7,8 @@ from geometry_msgs.msg import Twist
 
 class BowtieNavigator:
     def __init__(self):
-        rospy.init_node('point_navigator', anonymous=True)
+        rclpy.init()
+        node = rclpy.create_node('point_navigator', anonymous=True)
         
         # 1. 弓字型路径点（含目标朝向）：(经度, 纬度, 目标朝向角°)
         self.waypoints = [
@@ -35,8 +36,8 @@ class BowtieNavigator:
         self.decel_distance = 2.0     # 减速距离（米）
         
         # 3. ROS通信
-        self.gps_sub = rospy.Subscriber('/gps/raw', String, self.gps_callback)
-        self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.gps_sub = node.create_subscription(String, '/gps/raw', self.gps_callback)
+        self.cmd_pub = node.create_publisher(Twist, queue_size=10, '/cmd_vel')
         rospy.loginfo("Bowtie navigator initialized.")
 
     def gps_callback(self, msg):

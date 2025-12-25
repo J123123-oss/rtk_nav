@@ -1,2 +1,2 @@
-Header header
-LatLonPoint[] points  # 目标点序列
+std_msgs/Header header
+LatLonPoint[] points# 目标点序列

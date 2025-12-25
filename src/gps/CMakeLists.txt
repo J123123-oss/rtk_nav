@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.5)
 project(gps)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
@@ -7,19 +7,19 @@ project(gps)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-  roscpp
-  rospy
-  std_msgs
-  serial
-  geodesy
-  tf2_geometry_msgs
-  message_generation
-)
+
+find_package(rosidl_default_generators REQUIRED)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclpy REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(serial REQUIRED)
+find_package(geodesy REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+set(CMAKE_CXX_STANDARD 1 4)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
-
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -51,10 +51,14 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
-add_message_files(
-  FILES
-  LatLonPoint.msg
-  WTRTK.msg
+
+rosidl_generate_interfaces(
+    ${PROJECT_NAME}
+        msg/WTRTK.msg
+        msg/latLonPoint.msg
+        msg/LatLonPoint.msg
+    DEPENDENCIES
+        
 )
 
 ## Generate services in the 'srv' folder
@@ -72,10 +76,6 @@ add_message_files(
 # )
 
 ## Generate added messages and services with any dependencies listed here
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -106,9 +106,6 @@ generate_messages(
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
-  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime
-)
 
 ###########
 ## Build ##
@@ -118,14 +115,7 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
-  ${catkin_INCLUDE_DIRS}
-)
-catkin_install_python(PROGRAMS
-scripts/serial_listener.py
-scripts/cleaning_path_planner.py
-scripts/MotorControlNode.py
-scripts/wtrtk_serial_driver.py
-DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  
 )
 
 ## Declare a C++ library
@@ -143,8 +133,6 @@ DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/gps_node.cpp)
 add_executable(mqtt_processor_node src/mqtt_processor_node.cpp)
-add_executable(test_topic src/test_topic.cpp)
-add_executable(dis_cal src/dis_cal.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -155,23 +143,65 @@ add_executable(dis_cal src/dis_cal.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(mqtt_processor_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(dis_cal ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-# add_dependencies(test_topic ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
+# add_dependencies(test_topic ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node
 #   ${catkin_LIBRARIES}
 # )
-target_link_libraries(mqtt_processor_node
-  ${catkin_LIBRARIES}
+ament_target_dependencies(mqtt_processor_node
+  "serial_comms"
+  "std_srvs"
+  "sensor_msgs"
+  "rclpy"
+  "geodesy"
+  "serial"
+  "tf2_ros"
+  "geometry_msgs"
+  "rclcpp"
+  "std_msgs"
+  "geographic_msgs"
+  "nav_msgs"
 )
-target_link_libraries(test_topic
-  ${catkin_LIBRARIES}
+add_executable(test_topic src/test_topic.cpp)
+ament_target_dependencies(test_topic
+  "serial_comms"
+  "std_srvs"
+  "sensor_msgs"
+  "rclpy"
+  "geodesy"
+  "serial"
+  "tf2_ros"
+  "geometry_msgs"
+  "rclcpp"
+  "std_msgs"
+  "geographic_msgs"
+  "nav_msgs"
 )
-target_link_libraries(dis_cal
-  ${catkin_LIBRARIES}
+add_executable(dis_cal src/dis_cal.cpp)
+ament_target_dependencies(dis_cal
+  "serial_comms"
+  "std_srvs"
+  "sensor_msgs"
+  "rclpy"
+  "geodesy"
+  "serial"
+  "tf2_ros"
+  "geometry_msgs"
+  "rclcpp"
+  "std_msgs"
+  "geographic_msgs"
+  "nav_msgs"
+)
+ament_export_dependencies(rclcpp rclpy std_msgs message_runtime)
+ament_package()
+catkin_install_python(PROGRAMS
+scripts/serial_listener.py
+scripts/cleaning_path_planner.py
+scripts/MotorControlNode.py
+scripts/wtrtk_serial_driver.py
+DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 #############
 ## Install ##

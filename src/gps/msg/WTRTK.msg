@@ -1,27 +1,2 @@
-# WTRTK.msg
-Header header
-float64 diff_x          # 差分X距离:米
-float64 diff_y          # 差分Y距离:米
-float64 diff_z          # 差分Z距离:米
-float64 diff_r          # 差分R距离:米
-float64 angle_x         # 角度X:度
-float64 angle_y         # 角度Y:度
-float64 angle_z         # 角度Z:度
-int32 fix_status        # 定向状态:0:初始化,1:单点,2:码差分,4:固定解,5:浮点解
-int32 wireless_status   # 无线连接状态:21:已连接
-int32 ntrip_status      # Ntrip连接状态:5:连接成功
-int32 signal_quality    # 无线信号质量:0-31
-int32 data_rate         # 无线通讯数据量:byte/s
-string gps_heading      # GPS航向角:0-360°地速<5km/h时为--
-int32 calib_flag        # 安装校准标志:0:未校准,1:已校准
-float64 battery_voltage # 电池电压:V
-float64 temperature     # 温度:℃
-int32 base_distance     # 基站距离:米
-int32 ins_flag          # 惯导标志:0:初始化,1:初步,2:完全
-float64 ins_latitude     # 惯导纬度:度分>>十进制使用
-string lat_flag         # 纬度标志:N/S
-float64 ins_longitude    # 惯导经度:度分>>十进制使用
-string lon_flag         # 经度标志:E/W
-float64 ins_speed       # 惯导地速:km/h
-float64 ins_heading     # 惯导航向角:度
-float64 ins_altitude    # 惯导高度:米
+# WTRTK.msgstd_msgs/Header header
+float64 diff_x# 差分X距离:米float64 diff_y# 差分Y距离:米float64 diff_z# 差分Z距离:米float64 diff_r# 差分R距离:米float64 angle_x# 角度X:度float64 angle_y# 角度Y:度float64 angle_z# 角度Z:度int32 fix_status# 定向状态:0:初始化,1:单点,2:码差分,4:固定解,5:浮点解int32 wireless_status# 无线连接状态:21:已连接int32 ntrip_status# Ntrip连接状态:5:连接成功int32 signal_quality# 无线信号质量:0-31int32 data_rate# 无线通讯数据量:byte/sstring gps_heading# GPS航向角:0-360°地速<5km/h时为--int32 calib_flag# 安装校准标志:0:未校准,1:已校准float64 battery_voltage# 电池电压:Vfloat64 temperature# 温度:℃int32 base_distance# 基站距离:米int32 ins_flag# 惯导标志:0:初始化,1:初步,2:完全float64 ins_latitude# 惯导纬度:度分>>十进制使用string lat_flag# 纬度标志:N/Sfloat64 ins_longitude# 惯导经度:度分>>十进制使用string lon_flag# 经度标志:E/Wfloat64 ins_speed# 惯导地速:km/hfloat64 ins_heading# 惯导航向角:度float64 ins_altitude# 惯导高度:米

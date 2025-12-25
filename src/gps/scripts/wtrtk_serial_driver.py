@@ -11,7 +11,8 @@ from serial_comms.msg import WTRTK  # 替换为你的功能包名
 class WTRTKSerialDriver:
     def __init__(self):
         # 初始化节点
-        rospy.init_node('wtrtk_serial_driver', anonymous=True)
+        rclpy.init()
+        node = rclpy.create_node('wtrtk_serial_driver', anonymous=True)
         
         # 读取参数（默认端口和波特率）
         self.port = rospy.get_param('~port', '/dev/WTRTK')
@@ -22,9 +23,9 @@ class WTRTKSerialDriver:
         self.connect_serial()
         
         # 新增：GNGGA消息发布者（话题名：/fix）
-        self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)
+        self.fix_pub = node.create_publisher(NavSatFix, queue_size=10, '/fix')
         # WTRTK消息发布者（保持不变）
-        self.wtrtk_pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
+        self.wtrtk_pub = node.create_publisher(WTRTK, queue_size=10, '/wtrtk_data')
         
         self.buffer = ""  # 缓存串口数据，同时用于两种帧的解析
         

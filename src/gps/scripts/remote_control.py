@@ -68,8 +68,9 @@ class SBUSRemoteControl:
         # 初始化电机控制器
         self.motor_ctrl = MotorController()
         # 初始化ROS节点和发布者
-        rospy.init_node("sbus_remote_control", anonymous=True)
-        self.speed_pub = rospy.Publisher("/wheel_speed", Vector3, queue_size=10)
+        rclpy.init()
+        node = rclpy.create_node("sbus_remote_control", anonymous=True)
+        self.speed_pub = node.create_publisher(Vector3, queue_size=10, "/wheel_speed")
         # 遥控器通道数据缓存（初始化为中间值）
         self.channels = [RC_CH_MID_VALUE] * CHANNEL_COUNT
         # 线程控制标志

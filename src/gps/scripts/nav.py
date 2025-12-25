@@ -10,21 +10,22 @@ from gps.msg import LatLonList, LatLonPoint  # 自定义消息
 class LatLonNavController:
     def __init__(self):
         # ROS节点初始化
-        rospy.init_node('latlon_nav_controller', anonymous=True)
+        rclpy.init()
+        node = rclpy.create_node('latlon_nav_controller', anonymous=True)
         
         # 订阅器：经纬度列表、惯导/里程计数据
-        self.waypoint_sub = rospy.Subscriber(
-            '/latlon_waypoints', LatLonList, self.waypoint_callback
+        self.waypoint_sub = node.create_subscription(LatLonList, 
+            '/latlon_waypoints', self.waypoint_callback
         )
 
-        self.imu_sub = rospy.Subscriber(
-            '/imu/data', Imu, self.imu_callback
+        self.imu_sub = node.create_subscription(Imu, 
+            '/imu/data', self.imu_callback
         )
-        # self.odom_sub = rospy.Subscriber(
-        #     '/odom', Odometry, self.odom_callback  # 优先用里程计（比IMU更准）
+        # self.odom_sub = node.create_subscription(Odometry, 
+        #     '/odom', self.odom_callback  # 优先用里程计（比IMU更准）
         # )
         # 发布器：控制指令
-        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        self.cmd_vel_pub = node.create_publisher(Twist, queue_size=10, '/cmd_vel')
         
         # 目标点参数
         self.utm_waypoints = []  # 转换后的UTM坐标 [(x1,y1), (x2,y2), ...]

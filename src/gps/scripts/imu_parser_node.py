@@ -11,7 +11,8 @@ import std_srvs.srv
 
 class IMUParser:
     def __init__(self):
-        rospy.init_node('imu_parser_node')
+        rclpy.init()
+        node = rclpy.create_node('imu_parser_node')
         
         # 参数配置
         self.port = rospy.get_param('~serial_port', '/dev/IMU')
@@ -22,14 +23,14 @@ class IMUParser:
         self.reconnect_interval = 1.0  # 重连间隔
         self.last_reconnect_time = 0
 
-        self.start_srv = rospy.Service('~start_imu', std_srvs.srv.Trigger, self.handle_start)
-        self.stop_srv = rospy.Service('~stop_imu', std_srvs.srv.Trigger, self.handle_stop)
+        self.start_srv = node.create_service(std_srvs.srv.Trigger, '~start_imu', self.handle_start)
+        self.stop_srv = node.create_service(std_srvs.srv.Trigger, '~stop_imu', self.handle_stop)
         
         # 初始化串口
         self.init_serial()
 
         # 发布IMU数据
-        self.imu_pub = rospy.Publisher('/imu_data', Vector3Stamped, queue_size=1)
+        self.imu_pub = node.create_publisher(Vector3Stamped, queue_size=1, '/imu_data')
         
         self.working = False  # IMU工作状态标志
         self.timer = None

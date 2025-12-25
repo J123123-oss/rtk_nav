@@ -200,7 +200,8 @@ def get_ros_param(name, default):
 
 def main():
     # 初始化ROS节点
-    rospy.init_node('cleaning_path_planner', anonymous=True)
+    rclpy.init()
+    node = rclpy.create_node('cleaning_path_planner', anonymous=True)
     
     # 从rosparam获取参数（封装rospy.get_param,支持通过launch文件或命令行设置）
     param = {

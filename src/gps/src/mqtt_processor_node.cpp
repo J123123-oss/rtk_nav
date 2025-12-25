@@ -1,5 +1,5 @@
-#include <ros/ros.h>
-#include <std_msgs/String.h>
+#include "rclcpp/rclcpp.hpp"
+#include <std_msgs/msg/string.hpp>
 #include <cstring>// For std::strlen
 #include <stdio.h>
 #include <math.h>
@@ -26,7 +26,7 @@ class SerialProcessor {
 public:
     SerialProcessor() {
         // 初始化ROS节点和订阅者
-        ros::NodeHandle nh;
+        rclcpp::Node nh;
         sub_ = nh.subscribe("/rosmsg", 1000, &SerialProcessor::serialCallback, this);//调试文本消息
         // sub_ = nh.subscribe("/mqttmsg", 1000, &SerialProcessor::serialCallback, this);
         // 初始化数据缓冲区和标志
@@ -35,8 +35,8 @@ public:
         printf("Processor node initialized.\n" );
     }
 
-void serialCallback(const std_msgs::String::ConstPtr& msg) {
-    // ROS_INFO("Callback called with message: %s", msg->data.c_str());
+void serialCallback(const std_msgs::msg::String::ConstSharedPtr& msg) {
+    // RCLCPP_INFO(rclcpp::get_logger("Gps"), "Callback called with message: %s", msg->data.c_str());
     
     const std::string& data = msg->data;
     // printf("Received data: %s\n", data.c_str());
@@ -52,7 +52,7 @@ for (char dat : data) {
 
         // 检查缓冲区是否溢出
         if (gps_tau1201_num >= sizeof(gps_tau1201_buffer2) - 1) {
-            ROS_WARN("Buffer overflow, discarding data.");
+            RCLCPP_WARN(rclcpp::get_logger("Gps"), "Buffer overflow, discarding data.");
             continue;
         }
 
@@ -78,7 +78,7 @@ for (char dat : data) {
 
                         // 在 serialCallback 中
             // std::cout << "gps_data_parse - : " << gps_tau1201_buffer1 << std::endl;
-                // ROS_INFO("Received complete message: %s", message.c_str());
+                // RCLCPP_INFO(rclcpp::get_logger("Gps"), "Received complete message: %s", message.c_str());
         }
     }
 }
@@ -585,7 +585,7 @@ static void utc_to_btc (gps_time_struct *time)
     uint8_t heading_index = get_parameter_index(12, buf); // heading 的索引
     // std::cout << "gps_heading_parse, state: " << state << std::endl;
     if (state == 'F') {
-        // ROS_INFO("State: FINE");
+        // RCLCPP_INFO(rclcpp::get_logger("Gps"), "State: FINE");
         if (pitch_index > 0) {
             gps->pitch = get_float_number(&buf[pitch_index]); // 解析 pitch
             // printf("gps->pitch: %lf\n", gps->pitch);
@@ -658,23 +658,24 @@ static uint8_t gps_gngga_parse (char *line, gps_info_struct *gps)
 
 //--------------------------------------主函数----------------------------------------------------
 int main(int argc, char** argv) {
-    ros::init(argc, argv, "serial_processor_node");
-    ros::Time::init();
+    rclcpp::init(argc, argv);
+    auto node = rclcpp::Node::make_shared("serial_processor_node");
+    rclcpp::Time::init();
     
     // 设定两个不同的频率：一个是10Hz用来解析GPS数据，另一个是1Hz用来发布数据
-    ros::Rate gps_parse_rate(10); // GPS数据解析频率为10Hz
-    ros::Rate publish_rate(1);    // 发布频率为1Hz
+    rclcpp::Rate gps_parse_rate(10); // GPS数据解析频率为10Hz
+    rclcpp::Rate publish_rate(1);    // 发布频率为1Hz
     double last_publish_time = 0.0; // 上次发布的时间
     SerialProcessor processor;
 
-    ros::NodeHandle nh;
-    ros::Publisher gps_pub = nh.advertise<std_msgs::String>("gps/raw", 1000);
+    rclcpp::Node nh;
+    auto gps_pub = nh.advertise<std_msgs::msg::String>("gps/raw", 1000);
     bool has_valid_data = false; // 添加标志位，表示是否接收到有效数据
 
-    while (ros::ok()) {
+    while (rclcpp::ok()) {
         gps_data_parse(); // GPS 数据解析
 
-        std_msgs::String msg;
+        std_msgs::msg::String msg;
 
         // 检查GPS数据的有效性
         // if (gps_tau1201.latitude != 0 && gps_tau1201.longitude != 0 && gps_tau1201.heading != 0 ) {
@@ -696,7 +697,7 @@ int main(int argc, char** argv) {
             // heading: 航向 ( 0 到 360.0 ) 航向是主天线至从天线方向间基线向量逆时针方向与真北的夹角
             // pitch: 俯仰( ± 90 ) 
             json gps_data = {
-                {"timestamp", ros::Time::now().toSec()},
+                {"timestamp", rclcpp::Time::now().toSec()},
                 {"latitude", latitude_stream.str()},
                 {"longitude", longitude_stream.str()},
                 {"qual", gps_tau1201.qual},
@@ -711,19 +712,19 @@ int main(int argc, char** argv) {
         } else {
             // 如果从未接收到有效数据，则不输出任何内容
             gps_parse_rate.sleep(); // 等待下次GPS数据解析周期
-            ros::spinOnce();
+            rclcpp::spin_some(node);
             continue;
         }
 
         // 发布频率控制在1Hz
-        if (ros::Time::now().toSec() - last_publish_time >= 1.0) {
-            // ROS_INFO("%s", msg.data.c_str());
+        if (rclcpp::Time::now().toSec() - last_publish_time >= 1.0) {
+            // RCLCPP_INFO(rclcpp::get_logger("Gps"), "%s", msg.data.c_str());
             gps_pub.publish(msg);
-            last_publish_time = ros::Time::now().toSec();
+            last_publish_time = rclcpp::Time::now().toSec();
         }
 
         gps_parse_rate.sleep();  // 持续解析GPS数据
-        ros::spinOnce();
+        rclcpp::spin_some(node);
     }
 }
 
