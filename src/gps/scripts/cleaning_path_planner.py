@@ -205,12 +205,12 @@ def main():
     # 从rosparam获取参数（封装rospy.get_param,支持通过launch文件或命令行设置）
     param = {
         'corner1': (
-            get_ros_param('~corner1/lon', 120.07065199383332),
-            get_ros_param('~corner1/lat', 30.321056776833334)
+            get_ros_param('~corner1/lon', 120.07108186), #120.0709835,120.07065199383332
+            get_ros_param('~corner1/lat', 30.32157528) #30.32157528,30.321056776833334
         ),
         'corner2': (
-            get_ros_param('~corner2/lon', 120.070640642),
-            get_ros_param('~corner2/lat', 30.321051885333336)
+            get_ros_param('~corner2/lon', 120.07104303), #120.07104303,120.070640642
+            get_ros_param('~corner2/lat', 30.32149357)#30.32158572,30.321051885333336
         ),
         'interval': get_ros_param('~interval', 0.5),
         'edge_distance_lon': get_ros_param('~edge_distance_lon', 0.1),

@@ -22,7 +22,7 @@ class WTRTKSerialDriver:
         self.connect_serial()
         
         # 新增：GNGGA消息发布者（话题名：/fix）
-        # self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)
+        self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)
         # WTRTK消息发布者（保持不变）
         self.wtrtk_pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
         
@@ -234,7 +234,7 @@ class WTRTKSerialDriver:
             # 发布GNGGA解析结果
             if last_fix:
                 last_fix.header.stamp = rospy.Time.now()
-                # self.fix_pub.publish(last_fix)
+                self.fix_pub.publish(last_fix)
                 rospy.logdebug(f"Published GNGGA (fix status: {last_fix.status.status})")
             
             # 发布WTRTK解析结果

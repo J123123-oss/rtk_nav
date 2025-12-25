@@ -16,20 +16,22 @@ import threading
 
 # -------------------------- 1. 全局配置 --------------------------
 # 串口配置（CAN转USB工具 + SBUS遥控器串口）
-SERIAL_PORT_CAN = "/dev/CAN-pyserial"    # CAN转USB串口（电机控制）
+# SERIAL_PORT_CAN = "/dev/CAN-pyserial"    # CAN转USB串口（电机控制）
+SERIAL_PORT_CAN = "/dev/ttyv0"    # CAN转USB串口（电机控制）
 SERIAL_BAUDRATE_CAN = 921600             # CAN串口波特率
 SERIAL_TIMEOUT_CAN = 0.1                 # CAN串口超时时间
 
-SERIAL_PORT_SBUS = "/dev/ttyUSB0"        # SBUS转USB串口（遥控器）
+# SERIAL_PORT_SBUS = "/dev/ttyUSB0"        # SBUS转USB串口（遥控器）
+SERIAL_PORT_SBUS = "/dev/ttyv1"        # SBUS转USB串口（遥控器）
 SERIAL_BAUDRATE_SBUS = 115200            # SBUS串口波特率（115200,8N1）
 SERIAL_TIMEOUT_SBUS = 0.1                # SBUS串口超时时间
 
 # 遥控器配置（SBUS协议）
 FRAME_HEADER_SBUS = 0x0F                 # SBUS帧头
 FRAME_TAIL1_SBUS = 0x00                  # SBUS帧尾1
-FRAME_TAIL2_SBUS = 0x48                  # SBUS帧尾2
-FRAME_LENGTH_SBUS = 35                   # SBUS帧长度（1+32+2）
-CHANNEL_COUNT_SBUS = 16                  # 16通道
+FRAME_TAIL2_SBUS = 0x48                  # SBUS校验位
+FRAME_LENGTH_SBUS = 33                   # SBUS帧长度（1+30+2）
+CHANNEL_COUNT_SBUS = 15                  # 15通道
 # 遥控器通道阈值（三挡开关专用）
 RC_CH_MIN_VALUE = 282    # 低挡位
 RC_CH_MID_VALUE = 1002   # 中挡位
@@ -118,6 +120,8 @@ class SBUSRemoteParser:
         self.read_thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
         self.current_mode = ControlMode.NORMAL  # 初始模式
+        # self.current_mode = ControlMode.REMOTE  # 遥控器模式
+        
         # 重连配置  
         self.init_retry_count = 10  # 初始化时最大重连次数，默认5次，设为-1表示无限重试
         self.init_retry_interval = 1  # 初始化重连间隔（秒）
@@ -178,7 +182,7 @@ class SBUSRemoteParser:
         # 校验帧长度、帧头和尾标
         if len(frame) != FRAME_LENGTH_SBUS:
             return None
-        if frame[0] != FRAME_HEADER_SBUS or frame[-2] != FRAME_TAIL1_SBUS or frame[-1] != FRAME_TAIL2_SBUS:
+        if frame[0] != FRAME_HEADER_SBUS or frame[-2] != FRAME_TAIL1_SBUS:
             return None
 
         # 解析32字节数据为16个16bit通道值（小端模式）
@@ -531,7 +535,8 @@ class RTKNavigator:
         elif msg.status.status ==3:
             rospy.loginfo("[RTKNav] RTK定位")
         elif msg.status.status ==4:
-            rospy.loginfo("[RTKNav] RTK固定解")
+            pass
+            # rospy.loginfo("[RTKNav] RTK固定解")
 
         self.current_gps = (msg.longitude, msg.latitude)  # x=经度，y=纬度
 

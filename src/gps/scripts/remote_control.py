@@ -11,9 +11,9 @@ SERIAL_PORT = "/dev/ttyUSB0"  # 根据实际设备修改
 BAUD_RATE = 115200
 FRAME_HEADER = 0x0F
 FRAME_TAIL1 = 0x00
-FRAME_TAIL2 = 0x48
-FRAME_LENGTH = 35  # 帧头(1) + 数据(32) + 尾标(2) = 35字节
-CHANNEL_COUNT = 16  # 16通道
+# FRAME_TAIL2 = 0x48
+FRAME_LENGTH = 33  # 帧头(1) + 数据(30) + 尾标(2) = 35字节
+CHANNEL_COUNT = 16  # 15通道
 
 # 遥控器通道阈值（参考C宏定义com_rc_slave.h）
 RC_CH_MIN_VALUE = 282    # 通道最小值
@@ -105,8 +105,8 @@ class SBUSRemoteControl:
         if frame[0] != FRAME_HEADER:
             rospy.logdebug(f"帧头错误: 实际0x{frame[0]:02X}，期望0x{FRAME_HEADER:02X}")
             return None
-        if frame[-2] != FRAME_TAIL1 or frame[-1] != FRAME_TAIL2:
-            rospy.logdebug(f"帧尾错误: 实际0x{frame[-2]:02X}{frame[-1]:02X}，期望0x{FRAME_TAIL1:02X}{FRAME_TAIL2:02X}")
+        if frame[-2] != FRAME_TAIL1:
+            rospy.logdebug(f"帧尾错误: 实际0x{frame[-2]:02X}{frame[-1]:02X}，期望0x{FRAME_TAIL1:02X}")
             return None
 
         # 解析32字节数据为16个16bit通道值（小端模式）
