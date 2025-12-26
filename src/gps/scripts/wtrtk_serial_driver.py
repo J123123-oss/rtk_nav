@@ -5,7 +5,7 @@ import serial
 import threading
 import time
 from std_msgs.msg import Header
-from sensor_msgs.msg import NavSatFix  #GNGGA解析结果
+from sensor_msgs.msg import NavSatFix  # GNGGA解析结果
 from serial_comms.msg import WTRTK  # 替换为你的功能包名
 
 class WTRTKSerialDriver:
@@ -15,6 +15,7 @@ class WTRTKSerialDriver:
         
         # 读取参数（默认端口和波特率）
         self.port = rospy.get_param('~port', '/dev/WTRTK')
+        # self.port = rospy.get_param('~port', '/dev/ttyUSB0')
         self.baud_rate = rospy.get_param('~baud', 460800)
         
         # 初始化串口
@@ -27,6 +28,10 @@ class WTRTKSerialDriver:
         self.wtrtk_pub = rospy.Publisher('/wtrtk_data', WTRTK, queue_size=10)
         
         self.buffer = ""  # 缓存串口数据，同时用于两种帧的解析
+        
+        # 缓存最新解析的消息
+        self.latest_fix = None
+        self.latest_wtrtk = None
         
         # 线程与事件（保持不变，用于控制发布频率）
         self.publish_event = threading.Event()
@@ -54,6 +59,7 @@ class WTRTKSerialDriver:
         except Exception as e:
             rospy.logerr(f"Failed to open serial port {self.port}: {str(e)}")
             return False
+
     def dms_to_decimal(self, dms_str, is_latitude=True):
         """度分格式转十进制（强化空字符串和异常处理）"""
         try:
@@ -82,8 +88,9 @@ class WTRTKSerialDriver:
             if dms_str:
                 rospy.logwarn(f"经纬度转换失败: '{dms_str}', 错误: {e}，重置为0.0")
             return 0.0
+
     def parse_gngga(self, frame):
-        """解析$GNGGA帧，返回sensor_msgs/NavSatFix消息（优化空字段处理）"""
+        """解析$GNGGA帧，返回sensor_msgs/NavSatFix消息（修复字段索引错误）"""
         if not frame.startswith("$GNGGA"):
             return None
         
@@ -92,11 +99,11 @@ class WTRTKSerialDriver:
             rospy.logwarn("Invalid GNGGA frame (no checksum)")
             return None
         
-        content = frame[7:star_pos]
-        fields = content.split(',')
-        
-        if len(fields) < 14:
-            rospy.logwarn(f"Invalid GNGGA fields count: {len(fields)} (expected >=14)")
+        # 正确分割GNGGA帧：去掉$GNGGA前缀后再分割
+        # 示例GNGGA帧：$GNGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47
+        fields = frame.split(',')
+        if len(fields) < 15:  # 标准GNGGA至少15个字段（包含校验和部分）
+            rospy.logwarn(f"Invalid GNGGA fields count: {len(fields)} (expected >=15)")
             return None
         
         fix_msg = NavSatFix()
@@ -105,43 +112,50 @@ class WTRTKSerialDriver:
         fix_msg.header.frame_id = "gps"
         
         try:
-            # 解析经纬度（度分格式→十进制）- 优化空字段处理
-            # 纬度：字段2（可能为空）+ 字段3（N/S，可能为空）
-            lat_dms = fields[2] if fields[2].strip() else "0.0"  # 空字段默认0.0
-            lat_flag = fields[3].strip() if len(fields) > 3 else "N"  # 默认N
+            # 正确的GNGGA字段索引（关键修复！）
+            # fields索引：
+            # 0: $GNGGA, 1: UTC时间, 2: 纬度(度分), 3: 纬度方向(N/S), 4: 经度(度分), 
+            # 5: 经度方向(E/W), 6: 定位质量, 7: 卫星数, 8: HDOP, 9: 海拔高度, 
+            # 10: 海拔单位(M), 11: 大地水准面高度, 12: 大地水准面单位(M), 
+            # 13: 差分更新时间, 14: 差分基站ID*校验和
+
+            # 解析纬度
+            lat_dms = fields[2].strip() if fields[2].strip() else "0.0"
+            lat_flag = fields[3].strip() if fields[3].strip() else "N"
             latitude = self.dms_to_decimal(lat_dms, is_latitude=True)
-            if latitude is not None and lat_flag == 'S':
-                latitude = -latitude
-            
-            # 经度：字段4（可能为空）+ 字段5（E/W，可能为空）
-            lon_dms = fields[4] if fields[4].strip() else "0.0"  # 空字段默认0.0
-            lon_flag = fields[5].strip() if len(fields) > 5 else "E"  # 默认E
+            if lat_flag == 'S':
+                latitude = -abs(latitude)
+
+            # 解析经度
+            lon_dms = fields[4].strip() if fields[4].strip() else "0.0"
+            lon_flag = fields[5].strip() if fields[5].strip() else "E"
             longitude = self.dms_to_decimal(lon_dms, is_latitude=False)
-            if longitude is not None and lon_flag == 'W':
-                longitude = -longitude
-            
-            # 解析海拔（字段9：可能为空）
+            if lon_flag == 'W':
+                longitude = -abs(longitude)
+
+            # 解析海拔（字段9，跳过单位字段10）
             altitude = float(fields[9]) if fields[9].strip() else 0.0
-            
-            # 定位状态（字段6：可能为空，默认0=未定位）
+
+            # 定位状态（字段6：fix quality）
             fix_status = int(fields[6]) if fields[6].strip() else 0
             
             # 填充消息
-            fix_msg.latitude = latitude if latitude is not None else 0.0
-            fix_msg.longitude = longitude if longitude is not None else 0.0
+            fix_msg.latitude = latitude
+            fix_msg.longitude = longitude
             fix_msg.altitude = altitude
             fix_msg.status.status = fix_status
-            fix_msg.status.service = 1
+            fix_msg.status.service = 1  # GPS服务
             
-            # covariance
+            # 协方差设置
             fix_msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_APPROXIMATED
             fix_msg.position_covariance = [0.1, 0, 0, 0, 0.1, 0, 0, 0, 1.0]
             
         except (ValueError, IndexError) as e:
-            rospy.logwarn(f"Failed to parse GNGGA fields: {str(e)}")
+            rospy.logwarn(f"Failed to parse GNGGA fields: {str(e)}, frame: {frame}")
             return None
         
         return fix_msg
+
     def parse_wtrtk(self, frame):
         """解析$WTRTK帧（严格按照WTRTK.msg结构，优化空字段处理）"""
         if not frame.startswith("$WTRTK"):
@@ -156,7 +170,6 @@ class WTRTKSerialDriver:
         fields = content.split(',')
         
         if len(fields) != 25:
-            # rospy.logwarn(f"Invalid WTRTK fields count: {len(fields)} (expected 25)")
             return None
         
         msg = WTRTK()
@@ -198,13 +211,13 @@ class WTRTKSerialDriver:
             msg.ins_flag = int(fields[17]) if fields[17].strip() else 0
             
             # 8. 惯导经纬度（18-21）- 核心修复：处理空字段
-            ins_lat_dms = fields[18].strip() if fields[18].strip() else "0.0"  # 空字段默认0.0
+            ins_lat_dms = fields[18].strip() if fields[18].strip() else "0.0"
             msg.ins_latitude = self.dms_to_decimal(ins_lat_dms, is_latitude=True)
-            msg.lat_flag = fields[19].strip() if fields[19].strip() else "N"  # 空字段默认N
+            msg.lat_flag = fields[19].strip() if fields[19].strip() else "N"
             
-            ins_lon_dms = fields[20].strip() if fields[20].strip() else "0.0"  # 空字段默认0.0
+            ins_lon_dms = fields[20].strip() if fields[20].strip() else "0.0"
             msg.ins_longitude = self.dms_to_decimal(ins_lon_dms, is_latitude=False)
-            msg.lon_flag = fields[21].strip() if fields[21].strip() else "E"  # 空字段默认E
+            msg.lon_flag = fields[21].strip() if fields[21].strip() else "E"
             
             # 9. 惯导速度、航向角、高度（22-24）
             msg.ins_speed = float(fields[22]) if fields[22].strip() else 0.0
@@ -216,34 +229,28 @@ class WTRTKSerialDriver:
             return None
         
         return msg
+
     def publish_loop(self):
         """1Hz频率发布GNGGA和WTRTK数据"""
-        last_fix = None
-        last_wtrtk = None
         rate = rospy.Rate(1)  # 1Hz
         while not rospy.is_shutdown():
             self.publish_event.wait(timeout=1.0)
             self.publish_event.clear()
             
-            # 更新最新消息缓存
-            if hasattr(self, 'latest_fix'):
-                last_fix = self.latest_fix
-            if hasattr(self, 'latest_wtrtk'):
-                last_wtrtk = self.latest_wtrtk
-            
             # 发布GNGGA解析结果
-            if last_fix:
-                last_fix.header.stamp = rospy.Time.now()
-                self.fix_pub.publish(last_fix)
-                rospy.logdebug(f"Published GNGGA (fix status: {last_fix.status.status})")
+            if self.latest_fix:
+                self.latest_fix.header.stamp = rospy.Time.now()
+                self.fix_pub.publish(self.latest_fix)
+                rospy.logdebug(f"Published GNGGA (fix status: {self.latest_fix.status.status})")
             
             # 发布WTRTK解析结果
-            if last_wtrtk:
-                last_wtrtk.header.stamp = rospy.Time.now()
-                self.wtrtk_pub.publish(last_wtrtk)
-                rospy.logdebug(f"Published WTRTK (fix status: {last_wtrtk.fix_status})")
+            if self.latest_wtrtk:
+                self.latest_wtrtk.header.stamp = rospy.Time.now()
+                self.wtrtk_pub.publish(self.latest_wtrtk)
+                rospy.logdebug(f"Published WTRTK (fix status: {self.latest_wtrtk.fix_status})")
             
             rate.sleep()
+
     def read_serial(self):
         """持续读取串口数据，同时解析GNGGA和WTRTK帧"""
         while not rospy.is_shutdown():
@@ -283,7 +290,7 @@ class WTRTKSerialDriver:
                                 self.latest_fix = parsed_fix  # 缓存最新GNGGA消息
                                 self.publish_event.set()
                         else:
-                            # 处理WTRTK帧（复用原有逻辑）
+                            # 处理WTRTK帧
                             start_idx = wtrtk_start
                             end_idx = self.buffer.find('\r\n', start_idx)
                             if end_idx == -1:

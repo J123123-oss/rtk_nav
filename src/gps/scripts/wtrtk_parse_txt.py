@@ -13,9 +13,10 @@ class WTRTKFileParser:
         rospy.init_node('wtrtk_file_parser', anonymous=True)
         
         # 读取文件路径参数（默认：./返回.txt）
-        self.file_path = rospy.get_param('~file_path', '/home/ubuntu/rtk_nav/返回.txt')
+        # self.file_path = rospy.get_param('~file_path', '/home/ubuntu/rtk_nav/返回.txt')
+        self.file_path = rospy.get_param('~file_path', '/home/ubuntu/rtk_nav/src/gps/rtkmsgs/道路边轨迹3.txt')
         # 读取播放速率参数（单位：秒/行，默认0.1秒）
-        self.play_rate = rospy.get_param('~play_rate', 0.1)
+        self.play_rate = rospy.get_param('~play_rate', 1)
         
         # 消息发布者
         self.fix_pub = rospy.Publisher('/fix', NavSatFix, queue_size=10)

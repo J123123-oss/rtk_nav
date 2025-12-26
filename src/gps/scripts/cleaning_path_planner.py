@@ -7,6 +7,7 @@ import datetime
 from matplotlib.patches import FancyArrowPatch
 from std_msgs.msg import String
 import os
+import numpy as np
 
 # 设置中文字体
 matplotlib.rcParams["font.family"] = ["WenQuanYi Micro Hei", "Heiti TC", "SimHei"]
@@ -67,104 +68,135 @@ def calculate_heading_angles(path_latlon):
     
     return headings
 
-def generate_cleaning_path(corner1, corner2, param):
-    """生成矩形区域的清扫路径（支持经度/纬度方向分别设置边缘距离）"""
-    lon1, lat1 = corner1
-    lon2, lat2 = corner2
+def rotate_point(e, n, e0, n0, rotation_rad):
+    """
+    对UTM坐标点进行旋转（绕基准点(e0, n0)旋转）
+    参数:
+        e, n: 待旋转点的东向、北向坐标
+        e0, n0: 旋转中心（基准点）
+        rotation_rad: 旋转角度（弧度，顺时针为正）
+    返回:
+        e_rot, n_rot: 旋转后的东向、北向坐标
+    """
+    # 平移到原点（以基准点为中心）
+    e_trans = e - e0
+    n_trans = n - n0
     
-    # 从参数中提取配置
+    # 旋转矩阵（顺时针旋转，适配地理坐标系习惯）
+    e_rot_trans = e_trans * math.cos(rotation_rad) - n_trans * math.sin(rotation_rad)
+    n_rot_trans = e_trans * math.sin(rotation_rad) + n_trans * math.cos(rotation_rad)
+    
+    # 平移回原坐标系
+    e_rot = e_rot_trans + e0
+    n_rot = n_rot_trans + n0
+    
+    return e_rot, n_rot
+
+def generate_cleaning_path_with_rotation(base_point, width, height, rotation_deg, start_corner, param):
+    """
+    生成带旋转角度且支持自定义起点角点的清扫路径
+    参数新增：
+        start_corner: 轨迹起始角点，可选值 ['top_left', 'top_right', 'bottom_right', 'bottom_left']
+    """
+    lon0, lat0 = base_point
     interval = param['interval']
-    edge_lon = param['edge_distance_lon']  # 经度方向（东西）边缘距离
-    edge_lat = param['edge_distance_lat']  # 纬度方向（南北）边缘距离
-    
-    # 转换原始角点到UTM坐标
-    e1, n1, zone_num, zone_letter = get_utm_coords(lat1, lon1)
-    e2, n2, _, _ = get_utm_coords(lat2, lon2)
-    
-    # 原始UTM边界（平面坐标）
-    min_e = min(e1, e2)
-    max_e = max(e1, e2)
-    min_n = min(n1, n2)
-    max_n = max(n1, n2)
-    
-    # 计算内部后的UTM边界
-    inner_min_e = min_e + edge_lon
-    inner_max_e = max_e - edge_lon
-    inner_min_n = min_n + edge_lat
-    inner_max_n = max_n - edge_lat
-    
-    # 安全检查
-    if inner_min_e >= inner_max_e - 0.1 or inner_min_n >= inner_max_n - 0.1:
-        raise ValueError(
-            f"边缘距离过大，有效区域为空！\n"
-            f"经度方向内部后宽度: {inner_max_e - inner_min_e:.2f}m，"
-            f"纬度方向内部后高度: {inner_max_n - inner_min_n:.2f}m"
-        )
-    
-    # 原始和内部矩形角点（UTM坐标）
-    original_corners_utm = [
-        (min_e, max_n), (max_e, max_n), (max_e, min_n), (min_e, min_n)
-    ]
-    inner_corners_utm = [
-        (inner_min_e, inner_max_n), (inner_max_e, inner_max_n), 
-        (inner_max_e, inner_min_n), (inner_min_e, inner_min_n)
-    ]
-    
-    # 计算内部矩形尺寸
-    width_m = inner_max_e - inner_min_e
-    height_m = inner_max_n - inner_min_n
-    
-    # 生成清扫路径
-    path_latlon = []  # 经纬度路径点
-    path_utm = []     # UTM平面坐标路径点
-    
-    if width_m >= height_m:
-        # 沿高度方向来回清扫
-        num_strips = max(1, int(height_m / interval) + 1)
+    edge_lon = param['edge_distance_lon']
+    edge_lat = param['edge_distance_lat']
+    rotation_rad = degrees_to_radians(rotation_deg)
+
+    # 基准点转UTM
+    e0, n0, zone_num, zone_letter = get_utm_coords(lat0, lon0)
+    utm_zone = (zone_num, zone_letter)
+
+    # 1. 生成未旋转的原始矩形四个角点（以基准点为top_left）
+    orig_unrot = {
+        'top_left': (e0, n0),
+        'top_right': (e0 + width, n0),
+        'bottom_right': (e0 + width, n0 - height),
+        'bottom_left': (e0, n0 - height)
+    }
+
+    # 2. 旋转所有原始角点，并保持命名
+    orig_rot = {}
+    for corner_name, (e, n) in orig_unrot.items():
+        e_rot, n_rot = rotate_point(e, n, e0, n0, rotation_rad)
+        orig_rot[corner_name] = (e_rot, n_rot)
+    original_corners_utm = list(orig_rot.values())  # 兼容原有返回格式
+
+    # 3. 生成未旋转的内部矩形角点（同样命名）
+    inner_unrot = {
+        'top_left': (e0 + edge_lon, n0 - edge_lat),
+        'top_right': (e0 + width - edge_lon, n0 - edge_lat),
+        'bottom_right': (e0 + width - edge_lon, n0 - height + edge_lat),
+        'bottom_left': (e0 + edge_lon, n0 - height + edge_lat)
+    }
+
+    # 安全检查：内部区域有效性
+    inner_width = (e0 + width - edge_lon) - (e0 + edge_lon)
+    inner_height = (n0 - edge_lat) - (n0 - height + edge_lat)
+    if inner_width <= 0.1 or inner_height <= 0.1:
+        raise ValueError(f"内部区域无效！宽度:{inner_width:.2f}m, 高度:{inner_height:.2f}m")
+
+    # 4. 旋转内部矩形角点，并保持命名
+    inner_rot = {}
+    for corner_name, (e, n) in inner_unrot.items():
+        e_rot, n_rot = rotate_point(e, n, e0, n0, rotation_rad)
+        inner_rot[corner_name] = (e_rot, n_rot)
+    inner_corners_utm = list(inner_rot.values())  # 兼容原有返回格式
+
+    # 5. 生成未旋转的内部路径（沿宽度/高度方向，和之前逻辑一致）
+    path_utm_unrot = []
+    inner_e0_unrot = e0 + edge_lon
+    inner_n0_unrot = n0 - edge_lat
+    inner_width_unrot = width - 2 * edge_lon
+    inner_height_unrot = height - 2 * edge_lat
+
+    if inner_width_unrot >= inner_height_unrot:
+        num_strips = max(1, int(inner_height_unrot / interval) + 1)
         for i in range(num_strips):
-            current_n = inner_max_n - (inner_max_n - inner_min_n) * (i / (num_strips - 1) if num_strips > 1 else 0)
-            
+            current_n_unrot = inner_n0_unrot - (inner_height_unrot) * (i / (num_strips - 1) if num_strips > 1 else 0)
             if i % 2 == 0:
-                start_e, start_n = inner_min_e, current_n
-                end_e, end_n = inner_max_e, current_n
+                path_utm_unrot.append((inner_e0_unrot, current_n_unrot))
+                path_utm_unrot.append((inner_e0_unrot + inner_width_unrot, current_n_unrot))
             else:
-                start_e, start_n = inner_max_e, current_n
-                end_e, end_n = inner_min_e, current_n
-            
-            # 记录当前行的起点
-            lat_start, lon_start = get_latlon_from_utm(start_e, start_n, zone_num, zone_letter)
-            path_latlon.append((lon_start, lat_start))
-            path_utm.append((start_e, start_n))
-            
-            # 记录当前行的终点（最后一行也需要记录终点）
-            lat_end, lon_end = get_latlon_from_utm(end_e, end_n, zone_num, zone_letter)
-            path_latlon.append((lon_end, lat_end))
-            path_utm.append((end_e, end_n))
+                path_utm_unrot.append((inner_e0_unrot + inner_width_unrot, current_n_unrot))
+                path_utm_unrot.append((inner_e0_unrot, current_n_unrot))
     else:
-        # 沿宽度方向来回清扫
-        num_strips = max(1, int(width_m / interval) + 1)
+        num_strips = max(1, int(inner_width_unrot / interval) + 1)
         for i in range(num_strips):
-            current_e = inner_min_e + (inner_max_e - inner_min_e) * (i / (num_strips - 1) if num_strips > 1 else 0)
-            
+            current_e_unrot = inner_e0_unrot + (inner_width_unrot) * (i / (num_strips - 1) if num_strips > 1 else 0)
             if i % 2 == 0:
-                start_e, start_n = current_e, inner_max_n
-                end_e, end_n = current_e, inner_min_n
+                path_utm_unrot.append((current_e_unrot, inner_n0_unrot))
+                path_utm_unrot.append((current_e_unrot, inner_n0_unrot - inner_height_unrot))
             else:
-                start_e, start_n = current_e, inner_min_n
-                end_e, end_n = current_e, inner_max_n
+                path_utm_unrot.append((current_e_unrot, inner_n0_unrot - inner_height_unrot))
+                path_utm_unrot.append((current_e_unrot, inner_n0_unrot))
 
-            # 记录当前行的起点
-            lat_start, lon_start = get_latlon_from_utm(start_e, start_n, zone_num, zone_letter)
-            path_latlon.append((lon_start, lat_start))
-            path_utm.append((start_e, start_n))
-            
-            # 记录当前行的终点（最后一行也需要记录终点）
-            lat_end, lon_end = get_latlon_from_utm(end_e, end_n, zone_num, zone_letter)
-            path_latlon.append((lon_end, lat_end))
-            path_utm.append((end_e, end_n))
-    
-    return path_latlon, path_utm, original_corners_utm, inner_corners_utm, (zone_num, zone_letter)
+    # 6. 旋转路径点并转经纬度
+    path_utm_rot = []
+    path_latlon = []
+    for (e_unrot, n_unrot) in path_utm_unrot:
+        e_rot, n_rot = rotate_point(e_unrot, n_unrot, e0, n0, rotation_rad)
+        path_utm_rot.append((e_rot, n_rot))
+        lat, lon = get_latlon_from_utm(e_rot, n_rot, zone_num, zone_letter)
+        path_latlon.append((lon, lat))
 
+    # 7. 根据选定的起点角点，调整路径顺序
+    # 步骤1：找到旋转后内部矩形的起点角点坐标
+    inner_start_utm = inner_rot[start_corner]
+    # 步骤2：找到路径中距离起点角点最近的点（作为新路径的起点）
+    min_dist = float('inf')
+    start_idx = 0
+    for i, (e, n) in enumerate(path_utm_rot):
+        dist = math.hypot(e - inner_start_utm[0], n - inner_start_utm[1])
+        if dist < min_dist:
+            min_dist = dist
+            start_idx = i
+    # 步骤3：重排路径（从起点索引开始，循环拼接）
+    path_utm = path_utm_rot[start_idx:] + path_utm_rot[:start_idx]
+    path_latlon = path_latlon[start_idx:] + path_latlon[:start_idx]
+
+    return path_latlon, path_utm, original_corners_utm, inner_corners_utm, utm_zone
 def add_direction_arrows(ax, path_utm, arrow_interval=5):
     """在路径上添加方向箭头"""
     # 箭头间隔：每隔arrow_interval个点添加一个箭头
@@ -202,34 +234,47 @@ def main():
     # 初始化ROS节点
     rospy.init_node('cleaning_path_planner', anonymous=True)
     
-    # 从rosparam获取参数（封装rospy.get_param,支持通过launch文件或命令行设置）
+    # 扩展参数：新增基准点、矩形尺寸、旋转角度（解决角度固定问题）
     param = {
-        'corner1': (
-            get_ros_param('~corner1/lon', 120.07108186), #120.0709835,120.07065199383332
-            get_ros_param('~corner1/lat', 30.32157528) #30.32157528,30.321056776833334
+        'base_point': (
+            get_ros_param('~base_point/lon', 120.0712028,),#120.07124787),#120.07102944),
+            get_ros_param('~base_point/lat', 30.32071848)#30.32096372)#30.32099362)
         ),
-        'corner2': (
-            get_ros_param('~corner2/lon', 120.07104303), #120.07104303,120.070640642
-            get_ros_param('~corner2/lat', 30.32149357)#30.32158572,30.321051885333336
-        ),
-        'interval': get_ros_param('~interval', 0.5),
-        'edge_distance_lon': get_ros_param('~edge_distance_lon', 0.1),
-        'edge_distance_lat': get_ros_param('~edge_distance_lat', 0.1)
+        'rect_width': get_ros_param('~rect_width', 6.0),  # 矩形宽度（米）
+        'rect_height': get_ros_param('~rect_height', 15.0),# 矩形高度（米）
+        'rotation_deg': get_ros_param('~rotation_deg', 20.0), # 旋转角度（度，核心：控制区域朝向）
+        'interval': get_ros_param('~interval', 1.0),
+        'start_corner': get_ros_param('~start_corner', 'bottom_right'),  # 新增参数
+        'edge_distance_lon': get_ros_param('~edge_distance_lon', 0.5),
+        'edge_distance_lat': get_ros_param('~edge_distance_lat', 0.5)
     }
+    # 校验 start_corner 的合法性
+    valid_corners = ['top_left', 'top_right', 'bottom_right', 'bottom_left']
+    if param['start_corner'] not in valid_corners:
+        rospy.logerr(f"无效的start_corner: {param['start_corner']}，必须是 {valid_corners}")
+        return
     
     # 获取当前时间戳（用于文件名）
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     
     try:
-        # 生成清扫路径
-        path_latlon, path_utm, original_corners_utm, inner_corners_utm, utm_zone = generate_cleaning_path(
-            param['corner1'], param['corner2'], param)
+        # 生成带旋转角度的清扫路径（替换原有两点定区域的逻辑）
+        path_latlon, path_utm, original_corners_utm, inner_corners_utm, utm_zone = generate_cleaning_path_with_rotation(
+            param['base_point'], 
+            param['rect_width'], 
+            param['rect_height'], 
+            param['rotation_deg'], 
+            param['start_corner'],
+            param
+        )
         zone_num, zone_letter = utm_zone
         
         # 打印参数信息
         rospy.loginfo("参数配置:")
-        rospy.loginfo(f"  矩形对角点1: {param['corner1']}")
-        rospy.loginfo(f"  矩形对角点2: {param['corner2']}")
+        rospy.loginfo(f"  基准点: {param['base_point']}")
+        rospy.loginfo(f"  矩形宽度: {param['rect_width']}米")
+        rospy.loginfo(f"  矩形高度: {param['rect_height']}米")
+        rospy.loginfo(f"  旋转角度: {param['rotation_deg']}度")
         rospy.loginfo(f"  路径间隔: {param['interval']}米")
         rospy.loginfo(f"  经度方向边缘距离: {param['edge_distance_lon']}米")
         rospy.loginfo(f"  纬度方向边缘距离: {param['edge_distance_lat']}米")
@@ -241,11 +286,11 @@ def main():
 
         # 保存路径点时同时写入航向角
         with open(points_filename, "w", encoding="utf-8") as f:
-            f.write("序号,经度,纬度,航向角(度)\n")  # 新增航向角列
+            f.write("序号,经度,纬度,航向角(度)\n")
             for i in range(len(path_latlon)):
                 lon, lat = path_latlon[i]
                 heading = headings[i]
-                f.write(f"{i+1},{lon:.8f},{lat:.8f},{heading:.2f}\n")  # 保留2位小数
+                f.write(f"{i+1},{lon:.8f},{lat:.8f},{heading:.2f}\n")
         rospy.loginfo(f"所有路径点及航向角已保存到 {points_filename} 文件")
         
         # 绘制清扫路径
@@ -277,7 +322,7 @@ def main():
         ax.set_ylabel(f'UTM北向 (米) - 区域 {zone_num}{zone_letter}')
         ax.set_title(
             f'机器人清扫路径规划\n'
-            f'经度边缘距离: {param["edge_distance_lon"]}m, 纬度边缘距离: {param["edge_distance_lat"]}m'
+            f'旋转角度: {param["rotation_deg"]}°, 路径间隔: {param["interval"]}m'
         )
         ax.legend()
         ax.grid(True)

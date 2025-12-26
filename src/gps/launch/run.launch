@@ -1,7 +1,11 @@
 <launch>
   <!-- 电机控制节点 -->
   <node pkg="gps" type="MotorControlNode.py" name="motor_control_node" output="screen">
-    <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"/>
+    <!-- <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"/> -->
+    <!-- <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/道路4.txt"/> -->
+    <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251226_155005.txt"/>
+    <!-- <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"/> -->
+    <!-- <param name="~rtk_path_file" value="/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"/> -->
   </node>
   <!-- RTK实时消息解析 -->
   <!-- <node pkg="gps" type="wtrtk_serial_driver.py" name="wtrtk_serial_driver" > -->
@@ -9,7 +13,14 @@
     <!-- <param name="baud" value="460800"/> -->
   <!-- </node> -->
   <!-- RTK录制的消息解析 -->
-  <node pkg="gps" type="wtrtk_parse_txt.py" name="wtrtk_parse_txt" output="screen"/>
+  <node pkg="gps" type="wtrtk_parse_txt.py" name="wtrtk_parse_txt" output="screen">
+    <!-- <param name="~file_path" value="/home/ubuntu/rtk_nav/src/gps/rtkmsgs/直线往返1.txt"/> -->
+    <param name="~file_path" value="/home/ubuntu/rtk_nav/src/gps/rtkmsgs/道路边轨迹3.txt"/>
+    <!-- <param name="~file_path" value="/home/ubuntu/rtk_nav/src/gps/rtkmsgs/直线往返1.txt"/> -->
+    <!-- <param name="~file_path" value="/home/ubuntu/rtk_nav/src/gps/rtkmsgs/直线往返1.txt"/> -->
+    <!-- <param name="~file_path" value="/home/ubuntu/rtk_nav/src/gps/rtkmsgs/直线往返1.txt"/> -->
+  </node>
+
 
   <!-- 新场景第一步：cleaning_path_planner规划清扫路径 -->
   <!-- <node pkg="gps" type="cleaning_path_planner.py" name="cleaning_path_planner" output="screen"> -->
@@ -18,6 +29,8 @@
     <param name="~corner2/lon" value="120.06706355" />
     <param name="~corner2/lat" value="30.32097315" />
     <param name="~interval" value="4" />
+    <param name="~start_corner" value="bottom_left" />
+    <param name="~rotation_deg" value="0" />
     <param name="~edge_distance_lon" value="10" />
     <param name="~edge_distance_lat" value="10" /> -->
   <!-- </node> -->

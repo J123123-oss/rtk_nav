@@ -41,7 +41,9 @@ DEAD_ZONE_SBUS = 20      # 摇杆死区
 MAX_SPEED_REMOTE = 2.0   # 遥控器控制最大角速度（rad/s，可调整）
 
 # RTK导航配置
-RTK_PATH_FILE = rospy.get_param('~rtk_path_file', "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt")
+# RTK_PATH_FILE = rospy.get_param('~rtk_path_file', "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt")
+RTK_PATH_FILE = rospy.get_param('~rtk_path_file', "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251226_160957.txt")
+# RTK_PATH_FILE = rospy.get_param('~rtk_path_file', "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251226_155005.txt")
 # RTK_PATH_FILE = "/home/ubuntu/rtk_nav/src/gps/cleaning_path/cleaning_path_20251121_173149.txt"  # RTK路径文件
 RTK_WAYPOINT_TOLERANCE = 0.5       # 到达目标点的距离 tolerance（米）
 RTK_HEADING_TOLERANCE = 0.5         # 到达目标点的航向角容忍度（度）
@@ -49,7 +51,7 @@ LINEAR_SPEED_BASE = 0.0124           # 基础线速度（m/s，需根据电机�
 ANGULAR_SPEED_BASE = 0.1             # 调整：航向校准角速度（rad/s）,提高校准效率
 INITIAL_MOVE_TOLERANCE = 0.5         # 初始点到第一个航点的到达阈值（米）
 IMU_CALIBRATION_TIMEOUT = 3.0        # IMU初始校准超时时间（秒）
-HEADING_CALIBRATION_TIMEOUT = 10.0    # 新增：航向校准超时时间（秒），避免卡在转向步骤
+HEADING_CALIBRATION_TIMEOUT = 5.0    # 新增：航向校准超时时间（秒），避免卡在转向步骤
 
 # 电机配置（支持多电机差速）
 GLOBAL_MOTOR_CONFIG: List[Dict] = [
